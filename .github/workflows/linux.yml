@@ -47,9 +47,7 @@ jobs:
       run: .github/workflows/dependencies/dependencies_nvcc.sh
     - name: Build & Install
       run: |
-        mkdir build
-        cd build
-        cmake ..                                             \
+        cmake -GNinja -S . -B build                          \                                             \
             -DNyx_HEATCOOL=yes                               \
             -DNyx_HYDRO=yes                                  \
             -DNyx_OMP=no                                     \
@@ -57,9 +55,8 @@ jobs:
             -DCMAKE_C_COMPILER=$(which gcc-4.8)              \
             -DCMAKE_CXX_COMPILER=$(which g++-4.8)            \
             -DCMAKE_CUDA_HOST_COMPILER=$(which g++-4.8)      \
-            -DCMAKE_Fortran_COMPILER=$(which gfortran-4.8)   \
             -DAMReX_CUDA_ARCH=6.0
-        make -j 2
+        cmake --build build --parallel 2
 
   nyx-dpcpp:
     name: DPCPP@PubBeta GFortran@7.5 C++17

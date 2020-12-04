@@ -20,6 +20,5 @@ sudo apt-get install -y --no-install-recommends\
     libopenmpi-dev      \
     openmpi-bin         \
     nvidia-cuda-dev     \
-    nvidia-cuda-toolkit
-
-
+    nvidia-cuda-toolkit \
+    ninja-build
