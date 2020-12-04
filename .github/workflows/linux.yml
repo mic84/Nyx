@@ -47,7 +47,8 @@ jobs:
       run: .github/workflows/dependencies/dependencies_nvcc.sh
     - name: Build & Install
       run: |
-        cmake -GNinja -S . -B build                          \                                             \
+        cmake -GNinja -S . -B build                          \
+            -DCMAKE_VERBOSE_MAKEFILE=ON                      \
             -DNyx_HEATCOOL=yes                               \
             -DNyx_HYDRO=yes                                  \
             -DNyx_OMP=no                                     \
