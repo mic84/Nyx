@@ -15,4 +15,5 @@ sudo apt-get install -y  \
     libopenmpi-dev       \
     openmpi-bin          \
     libomp5              \
-    libomp-dev
+    libomp-dev           \
+    ninja-build
