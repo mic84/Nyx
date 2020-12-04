@@ -34,10 +34,8 @@ jobs:
               -DCMAKE_VERBOSE_MAKEFILE=ON               \
               -DNyx_HEATCOOL=yes                        \
               -DNyx_HYDRO=yes                           \
-              -DNyx_HEATCOOL=yes                        \
-              -DNyx_HYDRO=yes                           \
               -DCMAKE_C_COMPILER=$(which clang)         \
-              -DCMAKE_CXX_COMPILER=$(which clang++)     \
+              -DCMAKE_CXX_COMPILER=$(which clang++)
         cmake --build build --parallel 2
 
   nyx-cuda:
