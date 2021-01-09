@@ -1,8 +1,8 @@
-target_include_directories(${EXE_NAME}
+target_include_directories(nyxcore
    PUBLIC
    $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}> )
 
-target_sources( ${EXE_NAME}
+target_sources( nyxcore
    PRIVATE
    nyx_main.cpp
    Nyx.cpp
@@ -11,31 +11,27 @@ target_sources( ${EXE_NAME}
    Nyx_error.cpp
    )
 
-target_sources( ${EXE_NAME}
+target_sources( nyxcore
    PRIVATE
    sum_integrated_quantities.cpp
    sum_utils.cpp
    Nyx.H
+   Prob.H
    )
 
-
 if (Nyx_CGS)
-   target_sources( ${EXE_NAME}
+   target_sources( nyxcore
       PRIVATE
       constants_cosmo.H
       )
 endif ()
 
-if (DEFAULT_MAIN)
-   target_sources( ${EXE_NAME} PRIVATE main.cpp)
-endif ()
-
 if (Nyx_REBEER)
-   target_sources( ${EXE_NAME} PRIVATE Nyx_halos.cpp)
+   target_sources( nyxcore PRIVATE Nyx_halos.cpp)
 endif ()
 
 if (Nyx_GIMLET)
-   target_sources( ${EXE_NAME}
+   target_sources( nyxcore
       PRIVATE
       DoGimletAnalysis.cpp
       postprocess_tau_fields.cpp
@@ -46,3 +42,11 @@ if (Nyx_GIMLET)
       ps3d.cpp
       )
 endif ()
+
+
+#
+# Don't include this file in the source lists for nyxcore
+# Final executable will include it if necessary
+#
+set( NYX_DEFAULT_MAIN ${CMAKE_CURRENT_LIST_DIR}/main.cpp
+   CACHE INTERNAL "Default main if none other is provided")

@@ -15,8 +15,9 @@ trace_ppm(const Box& bx,
           const Real* dx,
           const Real gamma,
           const Real small_dens, const Real small_pres,
-          const Real small,
-          const int FirstSpec, const int NumSpec,
+#ifndef CONST_SPECIES
+          const int NumSpec,
+#endif
           const Real a_old)
 {
 
@@ -29,22 +30,15 @@ trace_ppm(const Box& bx,
   // p : gas (hydro) pressure
   // ptot : total pressure (note for pure hydro, this is
   //        just the gas pressure)
-  // rhoe_g : gas specific internal energy
   // cgas : sound speed for just the gas contribution
   // cc : total sound speed 
-  // h_g : gas specific enthalpy / cc**2
-  // gam_g : the gas Gamma_1
-  // game : gas gamma_e
   //
   // for pure hydro, we will only consider:
-  //    rho, u, v, w, ptot, rhoe_g, cc, h_g
+  //    rho, u, v, w, ptot, cc
 
-  Real hdt = 0.5_rt * dt;
+  Real hdtovera = 0.5_rt * dt / a_old;
   Real dtdx = dt / dx[idir];
   Real dtdxovera = dtdx / a_old;
-
-  auto lo = bx.loVect3d();
-  auto hi = bx.hiVect3d();
 
   auto vlo = vbx.loVect3d();
   auto vhi = vbx.hiVect3d();
@@ -93,8 +87,6 @@ trace_ppm(const Box& bx,
   amrex::ParallelFor(bx,
   [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
   {
-
-    Real rho = q_arr(i,j,k,QRHO);
 
     Real cc = std::sqrt(gamma * q_arr(i,j,k,QPRES)/q_arr(i,j,k,QRHO));
 
@@ -179,7 +171,8 @@ trace_ppm(const Box& bx,
         ppm_int_profile(sm, sp, s[i0], un, cc, dtdxovera, Ip_src[n], Im_src[n]);
     }
 
-    for (int n = FirstSpec; n < FirstSpec + NumSpec; ++n) {
+#ifndef CONST_SPECIES
+    for (int n = FirstSpec_comp; n < FirstSpec_comp + NumSpec; ++n) {
 
       // Plus state on face i
       if ((idir == 0 && i >= vlo[0]) ||
@@ -209,6 +202,7 @@ trace_ppm(const Box& bx,
         qm(i,j,k+1,n) = Ip[n][1];
       }
     }
+#endif
 
     // plus state on face i
 
@@ -224,7 +218,6 @@ trace_ppm(const Box& bx,
       Real un_ref  = Im[QUN][0];
 
       Real p_ref      = Im[QPRES][0];
-      Real rhoe_g_ref = Im[QREINT][0];
 
       Real gam_g_ref = gamma;
 
@@ -237,7 +230,6 @@ trace_ppm(const Box& bx,
       Real csq_ref = gam_g_ref*p_ref*rho_ref_inv;
       Real cc_ref = std::sqrt(csq_ref);
       Real cc_ref_inv = 1.0_rt/cc_ref;
-      Real h_g_ref = (p_ref + rhoe_g_ref)*rho_ref_inv;
 
       // *m are the jumps carried by un-c
       // *p are the jumps carried by un+c
@@ -246,67 +238,50 @@ trace_ppm(const Box& bx,
       //       only by the u wave (the contact)
 
       // we add the sources here so they participate in the tracing
-      Real dum    = un_ref - Im[QUN][0]   - hdt*Im_src[QUN][0] / a_old;
-      Real dptotm =  p_ref - Im[QPRES][0] - hdt*Im_src[QPRES][0] / a_old;
+      Real dum    = un_ref - Im[QUN][0]   - hdtovera*Im_src[QUN][0];
+      Real dptotm =  p_ref - Im[QPRES][0] - hdtovera*Im_src[QPRES][0];
 
-      Real drho = rho_ref - Im[QRHO][1]         - hdt*Im_src[QRHO][1] / a_old;
-      Real dptot = p_ref - Im[QPRES][1]         - hdt*Im_src[QPRES][1] / a_old;
-      Real drhoe_g = rhoe_g_ref - Im[QREINT][1] - hdt*Im_src[QREINT][1] / a_old;
+      Real drho    = rho_ref    - Im[QRHO][1]   - hdtovera*Im_src[QRHO][1];
+      Real dptot   = p_ref      - Im[QPRES][1]  - hdtovera*Im_src[QPRES][1];
 
-      Real dup = un_ref - Im[QUN][2]            - hdt*Im_src[QUN][2] / a_old;
-      Real dptotp = p_ref - Im[QPRES][2]        - hdt*Im_src[QPRES][2] / a_old;
+      Real dup     = un_ref     - Im[QUN][2]    - hdtovera*Im_src[QUN][2];
+      Real dptotp  = p_ref      - Im[QPRES][2]  - hdtovera*Im_src[QPRES][2];
 
       // {rho, u, p, (rho e)} eigensystem
 
       // These are analogous to the beta's from the original PPM
       // paper (except we work with rho instead of tau).  This is
       // simply (l . dq), where dq = qref - I(q)
-      
+
       Real alpham = 0.5_rt*(dptotm*rho_ref_inv*cc_ref_inv - dum)*rho_ref*cc_ref_inv;
       Real alphap = 0.5_rt*(dptotp*rho_ref_inv*cc_ref_inv + dup)*rho_ref*cc_ref_inv;
       Real alpha0r = drho - dptot/csq_ref;
-      Real alpha0e_g = drhoe_g - dptot*h_g_ref/csq_ref;
 
-      alpham    = un-cc > 0.0_rt ? 0.0_rt : -alpham;
-      alphap    = un+cc > 0.0_rt ? 0.0_rt : -alphap;
-      alpha0r   = un    > 0.0_rt ? 0.0_rt : -alpha0r;
-      alpha0e_g = un    > 0.0_rt ? 0.0_rt : -alpha0e_g;
+      // These terms only have the velocity source terms
+      Real dum_src = -hdtovera*Im_src[QUN][0];
+      Real dup_src = -hdtovera*Im_src[QUN][2];
 
+      // These terms only have the energy/pressure source terms
+      Real dptotm_src = - hdtovera*Im_src[QPRES][0];
+      Real dptot_src  = - hdtovera*Im_src[QPRES][1];
+      Real dptotp_src = - hdtovera*Im_src[QPRES][2];
+
+      // These are the definitions that will replace zero in the upwinding
+      Real alpham_src  = 0.5_rt*(dptotm_src*rho_ref_inv*cc_ref_inv - dum_src)*rho_ref*cc_ref_inv;
+      Real alphap_src  = 0.5_rt*(dptotp_src*rho_ref_inv*cc_ref_inv + dup_src)*rho_ref*cc_ref_inv;
+      Real alpha0r_src =       - dptot_src/csq_ref;
+          
+      alpham    = un-cc > 0.0_rt ? -alpham_src  : -alpham;
+      alphap    = un+cc > 0.0_rt ? -alphap_src  : -alphap;
+      alpha0r   = un    > 0.0_rt ? -alpha0r_src : -alpha0r;
+      
       // The final interface states are just
       // q_s = q_ref - sum(l . dq) r
       // note that the a{mpz}right as defined above have the minus already
 
-      if ( (rho_ref +  alphap + alpham + alpha0r) < 0.5 * rho_ref)
-      {
-#if 0
-          std::cout << "QP GOING LOW IN DIR " << idir << " BEFORE FIX AT " << IntVect(i,j,k) << " " << rho_ref << std::endl;
-          std::cout << "OLD PREDICTED RHO AT " << IntVect(i,j,k) << " " << 
-                        (rho_ref +  alphap + alpham + alpha0r) << std::endl;
-          std::cout << "OLD PREDICTED UN  AT " << IntVect(i,j,k) << " " << 
-                        un_ref + (alphap - alpham)*cc_ref*rho_ref_inv << std::endl;;
-#endif
+      Real rho_pred = rho_ref +  alphap + alpham + alpha0r;
 
-          alpham = 0.5_rt*(dptotm*rho_ref_inv*cc_ref_inv - dum)*rho_ref*cc_ref_inv;
-          alphap = 0.5_rt*(dptotp*rho_ref_inv*cc_ref_inv + dup)*rho_ref*cc_ref_inv;
-
-          Real dum_grav = -hdt*Im_src[QUN][0] / a_old;
-          Real dup_grav = -hdt*Im_src[QUN][2] / a_old;
-
-          Real alpham_grav = 0.5_rt*(-dum_grav)*rho_ref*cc_ref_inv;
-          Real alphap_grav = 0.5_rt*( dup_grav)*rho_ref*cc_ref_inv;
-          
-          alpham    = un-cc > 0.0_rt ? -alpham_grav : -alpham;
-          alphap    = un+cc > 0.0_rt ? -alphap_grav : -alphap;
-
-#if 0
-          std::cout << "NEW PREDICTED RHO AT " << IntVect(i,j,k) << " " << 
-                        (rho_ref +  alphap + alpham + alpha0r) << std::endl;
-          std::cout << "NEW PREDICTED UN  AT " << IntVect(i,j,k) << " " << 
-                        un_ref + (alphap - alpham)*cc_ref*rho_ref_inv << std::endl;;
-#endif
-      }
-
-      qp(i,j,k,QRHO ) = amrex::max(lsmall_dens, rho_ref +  alphap + alpham + alpha0r);
+      qp(i,j,k,QRHO ) = amrex::max(lsmall_dens, rho_pred);
       qp(i,j,k,QUN  ) = un_ref + (alphap - alpham)*cc_ref*rho_ref_inv;
       qp(i,j,k,QPRES) = amrex::max(lsmall_pres, p_ref + (alphap + alpham)*csq_ref);
 
@@ -317,8 +292,8 @@ trace_ppm(const Box& bx,
       // Recall that I already takes the limit of the parabola
       // in the event that the wave is not moving toward the
       // interface
-      qp(i,j,k,QUT)  = Im[QUT][1]  + hdt*Im_src[QUT][1] / a_old;
-      qp(i,j,k,QUTT) = Im[QUTT][1] + hdt*Im_src[QUTT][1] / a_old;
+      qp(i,j,k,QUT)  = Im[QUT][1]  + hdtovera*Im_src[QUT][1];
+      qp(i,j,k,QUTT) = Im[QUTT][1] + hdtovera*Im_src[QUTT][1];
 
       // This allows the (rho e) to take advantage of (pressure > small_pres)
       qp(i,j,k,QREINT) = qp(i,j,k,QPRES) / (gamma - 1.0);
@@ -336,7 +311,6 @@ trace_ppm(const Box& bx,
       Real un_ref = Ip[QUN][2];
 
       Real p_ref = Ip[QPRES][2];
-      Real rhoe_g_ref = Ip[QREINT][2];
 
       Real gam_g_ref = gamma;
 
@@ -349,20 +323,18 @@ trace_ppm(const Box& bx,
       Real csq_ref = gam_g_ref*p_ref*rho_ref_inv;
       Real cc_ref = std::sqrt(csq_ref);
       Real cc_ref_inv = 1.0_rt/cc_ref;
-      Real h_g_ref = (p_ref + rhoe_g_ref)*rho_ref_inv;
 
       // *m are the jumps carried by u-c
       // *p are the jumps carried by u+c
 
-      Real dum     = un_ref - Ip[QUN][0]   - hdt*Ip_src[QUN][0] / a_old;
-      Real dptotm  =  p_ref - Ip[QPRES][0] - hdt*Ip_src[QPRES][0] / a_old;
+      Real dum     = un_ref - Ip[QUN][0]   - hdtovera*Ip_src[QUN][0];
+      Real dptotm  =  p_ref - Ip[QPRES][0] - hdtovera*Ip_src[QPRES][0];
 
-      Real drho    = rho_ref -    Ip[QRHO][1]   - hdt*Ip_src[QRHO][1] / a_old;
-      Real dptot   =   p_ref    - Ip[QPRES][1]  - hdt*Ip_src[QPRES][1] / a_old;
-      Real drhoe_g = rhoe_g_ref - Ip[QREINT][1] - hdt*Ip_src[QREINT][1] / a_old;
+      Real drho    = rho_ref -    Ip[QRHO][1]   - hdtovera*Ip_src[QRHO][1];
+      Real dptot   =   p_ref    - Ip[QPRES][1]  - hdtovera*Ip_src[QPRES][1];
 
-      Real dup    = un_ref - Ip[QUN][2]   - hdt*Ip_src[QUN][2] / a_old;
-      Real dptotp =  p_ref - Ip[QPRES][2] - hdt*Ip_src[QPRES][2] / a_old;
+      Real dup    = un_ref - Ip[QUN][2]   - hdtovera*Ip_src[QUN][2];
+      Real dptotp =  p_ref - Ip[QPRES][2] - hdtovera*Ip_src[QPRES][2];
 
       // {rho, u, p, (rho e)} eigensystem
 
@@ -373,82 +345,66 @@ trace_ppm(const Box& bx,
       Real alpham = 0.5_rt*(dptotm*rho_ref_inv*cc_ref_inv - dum)*rho_ref*cc_ref_inv;
       Real alphap = 0.5_rt*(dptotp*rho_ref_inv*cc_ref_inv + dup)*rho_ref*cc_ref_inv;
       Real alpha0r = drho - dptot/csq_ref;
-      Real alpha0e_g = drhoe_g - dptot*h_g_ref/csq_ref;
 
-      alpham = un-cc > 0.0_rt ? -alpham : 0.0_rt;
-      alphap = un+cc > 0.0_rt ? -alphap : 0.0_rt;
-      alpha0r = un > 0.0_rt ? -alpha0r : 0.0_rt;
-      alpha0e_g = un > 0.0_rt ? -alpha0e_g : 0.0_rt;
+      // These terms only have the velocity source terms
+      Real dum_src = -hdtovera*Ip_src[QUN][0];
+      Real dup_src = -hdtovera*Ip_src[QUN][2];
+
+      // These terms only have the energy/pressure source terms
+      Real dptotm_src = - hdtovera*Ip_src[QPRES][0];
+      Real dptot_src  = - hdtovera*Ip_src[QPRES][1];
+      Real dptotp_src = - hdtovera*Ip_src[QPRES][2];
+
+      // These are the definitions that will replace zero in the upwinding
+      Real alpham_src  = 0.5_rt*(dptotm_src*rho_ref_inv*cc_ref_inv - dum_src)*rho_ref*cc_ref_inv;
+      Real alphap_src  = 0.5_rt*(dptotp_src*rho_ref_inv*cc_ref_inv + dup_src)*rho_ref*cc_ref_inv;
+      Real alpha0r_src =       - dptot_src/csq_ref;
+
+      alpham  = un-cc > 0.0_rt ? -alpham  : -alpham_src;
+      alphap  = un+cc > 0.0_rt ? -alphap  : -alphap_src;
+      alpha0r = un    > 0.0_rt ? -alpha0r : -alpha0r_src;
+
+      Real rho_pred = rho_ref +  alphap + alpham + alpha0r;
 
       // The final interface states are just
       // q_s = q_ref - sum (l . dq) r
       // note that the a{mpz}left as defined above have the minus already
 
-      if ( (rho_ref +  alphap + alpham + alpha0r) < 0.5 * rho_ref)
-      {
-#if 0
-           std::cout << "QM GOING LOW IN DIR " << idir << " BEFORE FIX AT " << IntVect(i,j,k) << " " << rho_ref << std::endl;
-           std::cout << "OLD PREDICTED RHO AT " << IntVect(i,j,k) << " " << 
-                            (rho_ref +  alphap + alpham + alpha0r) << std::endl;
-           std::cout << "OLD PREDICTED UN  AT " << IntVect(i,j,k) << " " << 
-                            un_ref + (alphap - alpham)*cc_ref*rho_ref_inv << std::endl;;
-#endif
-
-           alpham = 0.5_rt*(dptotm*rho_ref_inv*cc_ref_inv - dum)*rho_ref*cc_ref_inv;
-           alphap = 0.5_rt*(dptotp*rho_ref_inv*cc_ref_inv + dup)*rho_ref*cc_ref_inv;
-
-           Real dum_grav = -hdt*Ip_src[QUN][0] / a_old;
-           Real dup_grav = -hdt*Ip_src[QUN][2] / a_old;
-
-           Real alpham_grav = 0.5_rt*(-dum_grav)*rho_ref*cc_ref_inv;
-           Real alphap_grav = 0.5_rt*( dup_grav)*rho_ref*cc_ref_inv;
-           
-           alpham    = un-cc > 0.0_rt ? -alpham_grav : -alpham;
-           alphap    = un+cc > 0.0_rt ? -alphap_grav : -alphap;
-
-#if 0
-           std::cout << "NEW PREDICTED RHO AT " << IntVect(i,j,k) << " " << 
-                            (rho_ref +  alphap + alpham + alpha0r) << std::endl;
-           std::cout << "NEW PREDICTED UN  AT " << IntVect(i,j,k) << " " << 
-                            un_ref + (alphap - alpham)*cc_ref*rho_ref_inv << std::endl;;
-#endif
-      }
-
       if (idir == 0) {
 
-        qm(i+1,j,k,QRHO ) = amrex::max(lsmall_dens, rho_ref +  alphap + alpham + alpha0r);
+        qm(i+1,j,k,QRHO ) = amrex::max(lsmall_dens, rho_pred);
         qm(i+1,j,k,QUN  ) = un_ref + (alphap - alpham)*cc_ref*rho_ref_inv;
         qm(i+1,j,k,QPRES) = amrex::max(lsmall_pres, p_ref + (alphap + alpham)*csq_ref);
 
         // transverse velocities
-        qm(i+1,j,k,QUT) = Ip[QUT][1]   + hdt*Ip_src[QUT][1] / a_old;
-        qm(i+1,j,k,QUTT) = Ip[QUTT][1] + hdt*Ip_src[QUTT][1] / a_old;
+        qm(i+1,j,k,QUT) = Ip[QUT][1]   + hdtovera*Ip_src[QUT][1];
+        qm(i+1,j,k,QUTT) = Ip[QUTT][1] + hdtovera*Ip_src[QUTT][1];
 
         // This allows the (rho e) to take advantage of (pressure > small_pres)
         qm(i+1,j,k,QREINT) = qm(i+1,j,k,QPRES) / (gamma - 1.0);
 
       } else if (idir == 1) {
 
-        qm(i,j+1,k,QRHO ) = amrex::max(lsmall_dens, rho_ref +  alphap + alpham + alpha0r);
+        qm(i,j+1,k,QRHO ) = amrex::max(lsmall_dens, rho_pred);
         qm(i,j+1,k,QUN  ) = un_ref + (alphap - alpham)*cc_ref*rho_ref_inv;
         qm(i,j+1,k,QPRES) = amrex::max(lsmall_pres, p_ref + (alphap + alpham)*csq_ref);
 
         // transverse velocities
-        qm(i,j+1,k,QUT) = Ip[QUT][1]   + hdt*Ip_src[QUT][1] / a_old;
-        qm(i,j+1,k,QUTT) = Ip[QUTT][1] + hdt*Ip_src[QUTT][1] / a_old;
+        qm(i,j+1,k,QUT) = Ip[QUT][1]   + hdtovera*Ip_src[QUT][1];
+        qm(i,j+1,k,QUTT) = Ip[QUTT][1] + hdtovera*Ip_src[QUTT][1];
 
         // This allows the (rho e) to take advantage of (pressure > small_pres)
         qm(i,j+1,k,QREINT) = qm(i,j+1,k,QPRES) / (gamma - 1.0);
 
       } else if (idir == 2) {
 
-        qm(i,j,k+1,QRHO ) = amrex::max(lsmall_dens, rho_ref +  alphap + alpham + alpha0r);
+        qm(i,j,k+1,QRHO ) = amrex::max(lsmall_dens, rho_pred);
         qm(i,j,k+1,QUN  ) = un_ref + (alphap - alpham)*cc_ref*rho_ref_inv;
         qm(i,j,k+1,QPRES) = amrex::max(lsmall_pres, p_ref + (alphap + alpham)*csq_ref);
 
         // transverse velocities
-        qm(i,j,k+1,QUT) = Ip[QUT][1]   + hdt*Ip_src[QUT][1] / a_old;
-        qm(i,j,k+1,QUTT) = Ip[QUTT][1] + hdt*Ip_src[QUTT][1] / a_old;
+        qm(i,j,k+1,QUT) = Ip[QUT][1]   + hdtovera*Ip_src[QUT][1];
+        qm(i,j,k+1,QUTT) = Ip[QUTT][1] + hdtovera*Ip_src[QUTT][1];
 
         // This allows the (rho e) to take advantage of (pressure > small_pres)
         qm(i,j,k+1,QREINT) = qm(i,j,k+1,QPRES) / (gamma - 1.0);

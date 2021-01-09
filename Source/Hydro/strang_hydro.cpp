@@ -22,6 +22,7 @@ Nyx::strang_hydro (Real time,
     const Real prev_time    = state[State_Type].prevTime();
     const Real cur_time     = state[State_Type].curTime();
     
+    // Note that we need S_old if and only if CONST_SPECIES or HEATCOOL...
     MultiFab&  S_old        = get_old_data(State_Type);
     MultiFab&  S_new        = get_new_data(State_Type);
 
@@ -77,7 +78,7 @@ Nyx::strang_hydro (Real time,
       }
 
     // Define the gravity vector 
-    MultiFab grav_vector(grids, dmap, BL_SPACEDIM, NUM_GROW);
+    MultiFab grav_vector(grids, dmap, AMREX_SPACEDIM, NUM_GROW);
     //in case do_grav==0
     grav_vector.setVal(0);
 
@@ -136,8 +137,14 @@ Nyx::strang_hydro (Real time,
         
     D_old_tmp.clear();
 
+    // First reset internal energy before call to compute_temp
+    MultiFab reset_e_src(S_new.boxArray(), S_new.DistributionMap(), 1, NUM_GROW);
+    reset_e_src.setVal(0.0);
     update_state_with_sources(S_old_tmp,S_new,
                               ext_src_old,hydro_src,grav_vector,
+#ifdef SDC
+                              reset_e_src,
+#endif
                               dt,a_old,a_new);  
 
     S_old_tmp.clear();
@@ -261,8 +268,8 @@ Nyx::strang_hydro_ghost_state (Real time,
     const Real prev_time    = state[State_Type].prevTime();
     const Real cur_time     = state[State_Type].curTime();
     
-    MultiFab&  S_old        = get_old_data(State_Type);
     MultiFab&  S_new        = get_new_data(State_Type);
+    MultiFab&  S_old        = get_old_data(State_Type);
 
     MultiFab&  D_old        = get_old_data(DiagEOS_Type);
     MultiFab&  D_new        = get_new_data(DiagEOS_Type);
@@ -280,17 +287,7 @@ Nyx::strang_hydro_ghost_state (Real time,
 
     amrex::Gpu::Device::streamSynchronize();
     amrex::Gpu::setLaunchRegion(false);
-    /*    
-    if (S_old.contains_nan(Density, S_old.nComp(), 0))
-    {
-        for (int i = 0; i < S_old.nComp(); i++)
-        {
-            if (ParallelDescriptor::IOProcessor())
-                std::cout << "strang_hydro: testing component " << i << " for NaNs" << std::endl;
-            if (S_old.contains_nan(Density+i,1,0))
-                amrex::Abort("S_old has NaNs in this component");
-        }
-        }*/
+
     amrex::Gpu::setLaunchRegion(true);
 #endif
     
@@ -316,7 +313,7 @@ Nyx::strang_hydro_ghost_state (Real time,
       }
 
     // Define the gravity vector 
-    MultiFab grav_vector(grids, dmap, BL_SPACEDIM, NUM_GROW);
+    MultiFab grav_vector(grids, dmap, AMREX_SPACEDIM, NUM_GROW);
 
     //Not sure if amrex::average_face_to_cellcenter, looks like it launches
     //    amrex::Gpu::setLaunchRegion(false);
@@ -335,23 +332,11 @@ Nyx::strang_hydro_ghost_state (Real time,
 
     BL_PROFILE_VAR_STOP(old_tmp);
 
-    /*
-    S_new.setVal(1e999);
-    D_new.setVal(1e999);
-    
-    MultiFab::Copy(S_new,S_old,0,0,NUM_STATE,NUM_GROW);
-    FillPatch(*this, S_new, NUM_GROW, prev_time, State_Type, 0, NUM_STATE);
-
-    MultiFab::Copy(D_new,D_old,0,0,D_old.nComp(),NUM_GROW);
-    FillPatch(*this, D_new, NUM_GROW, prev_time, DiagEOS_Type, 0, D_old.nComp());*/
-
 #ifdef HEATCOOL
     if(verbose) {
       amrex::Print()<<"Before first strang:"<<std::endl;
       amrex::Arena::PrintUsage();
     }
-    /*    amrex::Print()<<S_old.nComp()<<S_old_tmp.nComp()<<S_new.nComp()<<std::endl;
-          amrex::Print()<<S_old.nGrow()<<S_old_tmp.nGrow()<<S_new.nGrow()<<std::endl;*/
     MultiFab::Copy(S_new,S_old,0,0,S_old.nComp(),0);//,S_old_tmp.nGrow());
     FillPatch(*this, S_new, S_new.nGrow(), prev_time, State_Type, 0, NUM_STATE);
     //    amrex::Gpu::synchronize();
@@ -370,8 +355,14 @@ Nyx::strang_hydro_ghost_state (Real time,
         
     D_old_tmp.clear();
 
+    // First reset internal energy before call to compute_temp
+    MultiFab reset_e_src(S_new.boxArray(), S_new.DistributionMap(), 1, NUM_GROW);
+    reset_e_src.setVal(0.0);
     update_state_with_sources(S_new,S_new,
                               ext_src_old,hydro_src,grav_vector,
+#ifdef SDC
+                              reset_e_src,
+#endif
                               dt,a_old,a_new);  
 
     hydro_src.clear();

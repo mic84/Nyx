@@ -12,10 +12,10 @@ using namespace amrex;
 
 void Nyx::integrate_state_force(
   amrex::Box const& bx,
-  amrex::Array4<amrex::Real> const& state,
-  amrex::Array4<amrex::Real> const& diag_eos,
-  const amrex::Real* dx,
-  const amrex::Real time,
+  amrex::Array4<amrex::Real> const& state_arr,
+  amrex::Array4<amrex::Real> const& diag_eos_arr,
+  const amrex::Real* /*dx*/,
+  const amrex::Real  /*time*/,
   const amrex::Real a,
   const amrex::Real half_dt)
 {
@@ -63,7 +63,7 @@ void Nyx::integrate_state_force(
   Real  small_eint = small_temp / (mu * m_nucleon_over_kB * (gamma - 1.0));
 
   const auto geomdata = geom.data();
-  forcing->integrate_state_force(bx, state, diag_eos, geomdata, a, half_dt, small_eint, small_temp);
+  forcing->integrate_state_force(bx, state_arr, diag_eos_arr, geomdata, a, half_dt, small_eint, small_temp);
   /*
       small_dens = 1.d-9*rhoe0
       small_temp = 1.d-3*temp0
@@ -73,12 +73,12 @@ void Nyx::integrate_state_force(
 
 void Nyx::ext_src_force(
   amrex::Box const& bx,
-  amrex::Array4<const amrex::Real> const& old_state,
+  amrex::Array4<const amrex::Real> const& /*old_state*/,
   amrex::Array4<const amrex::Real> const& new_state,
-  amrex::Array4<const amrex::Real> const& old_diag,
+  amrex::Array4<const amrex::Real> const& /*old_diag*/,
   amrex::Array4<amrex::Real> const& new_diag,
   amrex::Array4<amrex::Real> const& src,
-  const amrex::Real* problo,
+  const amrex::Real* /*problo*/,
   const amrex::Real* dx,
   const amrex::Real time,
   const amrex::Real z,
@@ -109,13 +109,13 @@ void Nyx::ext_src_force(
 	//  !   For old source: lo(:), hi(:) are the bounds of the growntilebox(src.nGrow9))
     //   For new source: lo(:), hi(:) are the bounds of the      tilebox, e.g. valid region only
     amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-			src(i,j,k,0)   = 0.0;
-			src(i,j,k,UMX)   = (tmp_state(i,j,k,UMX)   - new_state(i,j,k,UMX)) * a / half_dt;
-			src(i,j,k,UMY)   = (tmp_state(i,j,k,UMY)   - new_state(i,j,k,UMY)) * a / half_dt;
-			src(i,j,k,UMZ)   = (tmp_state(i,j,k,UMZ)   - new_state(i,j,k,UMZ)) * a / half_dt;
-			src(i,j,k,UEINT) = (tmp_state(i,j,k,UEINT) - new_state(i,j,k,UEINT)) * a / half_dt;
-			src(i,j,k,UEDEN) = (tmp_state(i,j,k,UEDEN) - new_state(i,j,k,UEDEN)) * a / half_dt;
-	 });
+	src(i,j,k,0)   = 0.0;
+	src(i,j,k,Xmom_comp) = (tmp_state(i,j,k,Xmom_comp)   - new_state(i,j,k,Xmom_comp)) * a / half_dt;
+	src(i,j,k,Ymom_comp) = (tmp_state(i,j,k,Ymom_comp)   - new_state(i,j,k,Ymom_comp)) * a / half_dt;
+	src(i,j,k,Zmom_comp) = (tmp_state(i,j,k,Zmom_comp)   - new_state(i,j,k,Zmom_comp)) * a / half_dt;
+	src(i,j,k,Eint_comp) = (tmp_state(i,j,k,Eint_comp) - new_state(i,j,k,Eint_comp)) * a / half_dt;
+	src(i,j,k,Eden_comp) = (tmp_state(i,j,k,Eden_comp) - new_state(i,j,k,Eden_comp)) * a / half_dt;
+    });
 }
 
 void
@@ -138,10 +138,10 @@ Nyx::get_old_source (Real      old_time,
     Sborder.define(grids, S_old.DistributionMap(), S_old.nComp(), 4);
     Dborder.define(grids, D_old.DistributionMap(), D_old.nComp(), 4);
 
-    FillPatch(*this, Sborder, 4, old_time, State_Type, Density, Sborder.nComp());
+    FillPatch(*this, Sborder, 4, old_time, State_Type, Density_comp, Sborder.nComp());
     FillPatch(*this, Dborder, 4, old_time, DiagEOS_Type, 0, D_old.nComp());
 #ifdef AMREX_DEBUG
-    Real min_rhoe = Sborder.min(Eint);
+    Real min_rhoe = Sborder.min(Eint_comp);
     if (min_rhoe < 0)
     {
         std::cout << "The state internal energy is negative" << std::endl;
@@ -164,7 +164,7 @@ Nyx::get_old_source (Real      old_time,
 
         // The formulae in subroutine ctoprim assume that the source term for density is zero
         // Here we abort if it is non-zero.
-        Real norm_density = ext_src[mfi].norm<RunOn::Device>(0,Density,1);
+        Real norm_density = ext_src[mfi].norm<RunOn::Device>(0,Density_comp,1);
         amrex::Gpu::streamSynchronize();
         if (norm_density != 0)
         {
@@ -203,10 +203,10 @@ Nyx::get_new_source (Real      old_time,
     Sborder_new.define(grids, S_new.DistributionMap(), S_new.nComp(), 4);
     Dborder_new.define(grids, D_new.DistributionMap(), D_new.nComp(), 4);
 
-    FillPatch(*this, Sborder_old, 4, old_time, State_Type  , Density, Sborder_old.nComp());
-    FillPatch(*this, Sborder_new, 4, new_time, State_Type  , Density, Sborder_new.nComp());
-    FillPatch(*this, Dborder_old, 4, old_time, DiagEOS_Type, 0      , Dborder_old.nComp());
-    FillPatch(*this, Dborder_new, 4, new_time, DiagEOS_Type, 0      , Dborder_new.nComp());
+    FillPatch(*this, Sborder_old, 4, old_time, State_Type  , Density_comp, Sborder_old.nComp());
+    FillPatch(*this, Sborder_new, 4, new_time, State_Type  , Density_comp, Sborder_new.nComp());
+    FillPatch(*this, Dborder_old, 4, old_time, DiagEOS_Type, 0           , Dborder_old.nComp());
+    FillPatch(*this, Dborder_new, 4, new_time, DiagEOS_Type, 0           , Dborder_new.nComp());
 
 #ifdef _OPENMP
 #pragma omp parallel

@@ -107,14 +107,13 @@ void Nyx::initcosmo()
 
 #ifdef GRAVITY
     Real comoving_OmL;
-    Real Gconst;
-    const Real len[BL_SPACEDIM] = {geom.ProbLength(0),geom.ProbLength(1),geom.ProbLength(2)};
+    const Real len[AMREX_SPACEDIM] = {geom.ProbLength(0),geom.ProbLength(1),geom.ProbLength(2)};
 
     Real particleMass;
     std::string mfDirName;
 
     Real redshift=-1;
-    Vector<int> n_part(BL_SPACEDIM);
+    Vector<int> n_part(AMREX_SPACEDIM);
 
     if (level > parent->useFixedUpToLevel())
     {
@@ -139,7 +138,7 @@ void Nyx::initcosmo()
 #endif
     ParmParse pp2("nyx");
     pp2.get("initial_z",redshift);
-    pp2.getarr("n_particles",n_part,0,BL_SPACEDIM);
+    pp2.getarr("n_particles",n_part,0,AMREX_SPACEDIM);
     
 #ifdef NUFLUID
     Real comoving_OmNu;
@@ -228,7 +227,7 @@ void Nyx::initcosmo()
     pp.get("ic-source", icSource);
     int baryon_den, baryon_vx;
     int part_dx, part_vx;
-    Real vel_fac[BL_SPACEDIM], dis_fac[BL_SPACEDIM];
+    Real vel_fac[AMREX_SPACEDIM], dis_fac[AMREX_SPACEDIM];
     const Real* dx = geom.CellSize();
 
 #ifdef NUFLUID
@@ -259,7 +258,7 @@ void Nyx::initcosmo()
           nu_vx = -1;
 #endif
        }
-       for (int n=0; n < BL_SPACEDIM; n++)
+       for (int n=0; n < AMREX_SPACEDIM; n++)
        {
           //vel_fac[n] = comoving_a * len[n]/comoving_h;
           //vel_fac[n] = len[n]/comoving_h;
@@ -286,7 +285,7 @@ void Nyx::initcosmo()
 #endif
        // Velocities are proportional to displacements by
        // LBox [MPc] * a * H [km/s/MPc]
-       for (int n=0;n<BL_SPACEDIM;n++)
+       for (int n=0;n<AMREX_SPACEDIM;n++)
        {
           vel_fac[n] = len[n]*comoving_a*std::sqrt(comoving_OmM/pow(comoving_a,3)+comoving_OmL)*comoving_h*100;
           dis_fac[n] = len[n];
@@ -332,8 +331,6 @@ void Nyx::initcosmo()
                                   part_dx, part_vx,
                                   myBaWhereNot,
                                   level, parent->initialBaLevels()+1);
-//    Nyx::theDMPC()->InitCosmo(mf, vel_fac, n_part, particleMass);
-    //Nyx::theDMPC()->InitCosmo(mf, vel_fac, n_part, particleMass, part_dx, part_vx);
 
     MultiFab& S_new = get_level(level).get_new_data(State_Type);
     MultiFab& D_new = get_level(level).get_new_data(DiagEOS_Type);
@@ -366,9 +363,6 @@ void Nyx::initcosmo()
             std::cout << "Do hydro initialization..." << '\n';
         }
 
-        MultiFab& S_new = get_level(level).get_new_data(State_Type);
-        MultiFab& D_new = get_level(level).get_new_data(DiagEOS_Type);
-
         //Fill everything with old data...should only affect ghostzones, but
         //seems to have no effect...
         if (level > 0)
@@ -379,31 +373,28 @@ void Nyx::initcosmo()
 
         //copy density 
         S_new.setVal(0.);
-        S_new.copy(mf, baryon_den, Density, 1);
-        S_new.plus(1,     Density, 1, S_new.nGrow());
-        S_new.mult(rhoB,  Density, 1, S_new.nGrow());
+        S_new.copy(mf, baryon_den, Density_comp, 1);
+        S_new.plus(1,     Density_comp, 1, S_new.nGrow());
+        S_new.mult(rhoB,  Density_comp, 1, S_new.nGrow());
 
 //      //This block assigns "the same" density for the baryons as for the dm.
 //      Vector<std::unique_ptr<MultiFab> > particle_mf;
 //      Nyx::theDMPC()->AssignDensity(particle_mf);
 //      particle_mf[0]->mult(comoving_OmB / comoving_OmD);
-//      S_new.copy(*particle_mf[0], 0, Density, 1);
+//      S_new.copy(*particle_mf[0], 0, Density_comp, 1);
 
         //copy velocities...
-        S_new.copy(mf, baryon_vx, Xmom, 3);
+        S_new.copy(mf, baryon_vx, Xmom_comp, 3);
 
         //...and "transform" to momentum
-        S_new.mult(vel_fac[0], Xmom, 1, S_new.nGrow());
-        MultiFab::Multiply(S_new, S_new, Density, Xmom, 1, S_new.nGrow());
-        S_new.mult(vel_fac[1], Ymom, 1, S_new.nGrow());
-        MultiFab::Multiply(S_new, S_new, Density, Ymom, 1, S_new.nGrow());
-        S_new.mult(vel_fac[2], Zmom, 1, S_new.nGrow());
-        MultiFab::Multiply(S_new, S_new, Density, Zmom, 1, S_new.nGrow());
+        S_new.mult(vel_fac[0], Xmom_comp, 1, S_new.nGrow());
+        MultiFab::Multiply(S_new, S_new, Density_comp, Xmom_comp, 1, S_new.nGrow());
+        S_new.mult(vel_fac[1], Ymom_comp, 1, S_new.nGrow());
+        MultiFab::Multiply(S_new, S_new, Density_comp, Ymom_comp, 1, S_new.nGrow());
+        S_new.mult(vel_fac[2], Zmom_comp, 1, S_new.nGrow());
+        MultiFab::Multiply(S_new, S_new, Density_comp, Zmom_comp, 1, S_new.nGrow());
 
         Real tempInit = 0.021*(1.0+redshift)*(1.0+redshift);
-
-        int ns = S_new.nComp();
-        int nd = D_new.nComp();
 
         D_new.setVal(tempInit, Temp_comp);
         D_new.setVal(0.0, Ne_comp);
@@ -415,19 +406,19 @@ void Nyx::initcosmo()
 #ifndef CONST_SPECIES
         // Convert X_i to (rho X)_i
         {
-           S_new.setVal(0.75, FirstSpec);
-           S_new.setVal(0.25, FirstSpec+1);
+           S_new.setVal(0.75, FirstSpec_comp);
+           S_new.setVal(0.25, FirstSpec_comp+1);
 
            for (int i = 0; i < NumSpec; i++)
            {
-              MultiFab::Multiply(S_new, S_new, Density, FirstSpec+i, 1, 0);
+              MultiFab::Multiply(S_new, S_new, Density_comp, FirstSpec_comp+i, 1, 0);
            }
         }
 #endif
     }
     else
     {
-       S_new.setVal(0.0, Density);
+       S_new.setVal(0.0, Density_comp);
        D_new.setVal(-23, Temp_comp);
        D_new.setVal(-42, Ne_comp);
     }

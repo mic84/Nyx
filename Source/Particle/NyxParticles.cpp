@@ -127,7 +127,6 @@ int Nyx::num_particle_ghosts = 1;
 int Nyx::particle_skip_factor = 1;
 
 std::string Nyx::particle_init_type = "";
-std::string Nyx::particle_move_type = "";
 
 // Allows us to output particles in the plotfile
 //   in either single (IEEE32) or double (NATIVE) precision.  
@@ -268,22 +267,13 @@ Nyx::read_particle_params ()
 
 #ifdef AGN
     pp.get("particle_init_type", particle_init_type);
-    pp.get("particle_move_type", particle_move_type);
 #else
     if (do_dm_particles)
     {
         pp.get("particle_init_type", particle_init_type);
-        pp.get("particle_move_type", particle_move_type);
         pp.query("init_with_sph_particles", init_with_sph_particles);
     }
 #endif
-
-    if (!do_grav && particle_move_type == "Gravitational")
-    {
-        if (ParallelDescriptor::IOProcessor())
-            std::cerr << "ERROR:: doesnt make sense to have do_grav=false but move_type = Gravitational" << std::endl;
-        amrex::Error();
-    }
 
     pp.query("particle_initrandom_serialize", particle_initrandom_serialize);
     pp.query("particle_initrandom_count", particle_initrandom_count);
@@ -364,7 +354,7 @@ Nyx::read_particle_params ()
     ParmParse ppp("particles");
     ppp.query("v", particle_verbose);
 
-    for (int i = 0; i < BL_SPACEDIM; i++) Nrep[i] = 1; // Initialize to one (no replication)
+    for (int i = 0; i < AMREX_SPACEDIM; i++) Nrep[i] = 1; // Initialize to one (no replication)
     ppp.query("replicate",Nrep);
     //
     // Set the cfl for particle motion (fraction of cell that a particle can
@@ -496,9 +486,9 @@ Nyx::init_particles ()
             // after reading in `m_pos[]`. Here we're reading in the particle
             // mass and velocity.
             //
-            DMPC->InitFromAsciiFile(ascii_particle_file, BL_SPACEDIM + 1, &Nrep);
+            DMPC->InitFromAsciiFile(ascii_particle_file, AMREX_SPACEDIM + 1, &Nrep);
             if (init_with_sph_particles == 1)
-                SPHPC->InitFromAsciiFile(sph_particle_file, BL_SPACEDIM + 1, &Nrep);
+                SPHPC->InitFromAsciiFile(sph_particle_file, AMREX_SPACEDIM + 1, &Nrep);
         }
         else if (particle_init_type == "BinaryFile")
         {
@@ -516,9 +506,9 @@ Nyx::init_particles ()
             // mass and velocity.
             //
             amrex::Gpu::LaunchSafeGuard lsg(particle_launch_ics);
-            DMPC->InitFromBinaryFile(binary_particle_file, BL_SPACEDIM + 1);
+            DMPC->InitFromBinaryFile(binary_particle_file, AMREX_SPACEDIM + 1);
             if (init_with_sph_particles == 1)
-              SPHPC->InitFromBinaryFile(sph_particle_file, BL_SPACEDIM + 1);
+              SPHPC->InitFromBinaryFile(sph_particle_file, AMREX_SPACEDIM + 1);
 
         }
         else if (particle_init_type == "BinaryMetaFile")
@@ -537,9 +527,9 @@ Nyx::init_particles ()
             // Here we're reading in the particle mass and velocity.
             //
             amrex::Gpu::LaunchSafeGuard lsg(particle_launch_ics);
-            DMPC->InitFromBinaryMetaFile(binary_particle_file, BL_SPACEDIM + 1);
+            DMPC->InitFromBinaryMetaFile(binary_particle_file, AMREX_SPACEDIM + 1);
             if (init_with_sph_particles == 1)
-                SPHPC->InitFromBinaryMetaFile(sph_particle_file, BL_SPACEDIM + 1);
+                SPHPC->InitFromBinaryMetaFile(sph_particle_file, AMREX_SPACEDIM + 1);
         }
         else if (particle_init_type == "BinaryMortonFile")
         {
@@ -556,7 +546,7 @@ Nyx::init_particles ()
             // Here we're reading in the particle mass and velocity.
             //
           DMPC->InitFromBinaryMortonFile(binary_particle_file,
-                                         BL_SPACEDIM + 1,
+                                         AMREX_SPACEDIM + 1,
                                          particle_skip_factor);
         }
         else
@@ -655,9 +645,9 @@ Nyx::init_particles ()
             // mass, velocity and angles.
             //
 #ifdef NEUTRINO_DARK_PARTICLES
-            NPC->InitFromAsciiFile(neutrino_particle_file, BL_SPACEDIM + 1, &Nrep);
+            NPC->InitFromAsciiFile(neutrino_particle_file, AMREX_SPACEDIM + 1, &Nrep);
 #else
-            NPC->InitFromAsciiFile(neutrino_particle_file, 2*BL_SPACEDIM + 1, &Nrep);
+            NPC->InitFromAsciiFile(neutrino_particle_file, 2*AMREX_SPACEDIM + 1, &Nrep);
 #endif
         }
         else if (particle_init_type == "BinaryFile")
@@ -672,7 +662,7 @@ Nyx::init_particles ()
             // after reading in `m_pos[]`. Here we're reading in the particle
             // mass and velocity.
             //
-            NPC->InitFromBinaryFile(neutrino_particle_file, BL_SPACEDIM + 1);
+            NPC->InitFromBinaryFile(neutrino_particle_file, AMREX_SPACEDIM + 1);
         }
         else if (particle_init_type == "BinaryMetaFile")
         {
@@ -686,7 +676,7 @@ Nyx::init_particles ()
             // after reading in `m_pos[]` in each of the binary particle files.
             // Here we're reading in the particle mass and velocity.
             //
-            NPC->InitFromBinaryMetaFile(neutrino_particle_file, BL_SPACEDIM + 1);
+            NPC->InitFromBinaryMetaFile(neutrino_particle_file, AMREX_SPACEDIM + 1);
         }
         else
         {
@@ -788,7 +778,6 @@ Nyx::init_santa_barbara (int init_sb_vels)
         BL_PROFILE_VAR_STOP(CA_partmf);
 
         BL_PROFILE_VAR("Nyx::init_santa_barbara()::init", CA_init);
-        const auto dx = geom.CellSizeArray();
         const auto geomdata = geom.data();
         MultiFab& S_new = get_new_data(State_Type);
         MultiFab& D_new = get_new_data(DiagEOS_Type);
@@ -808,13 +797,15 @@ Nyx::init_santa_barbara (int init_sb_vels)
             const auto fab_D_new=D_new.array(mfi);
 
             GpuArray<amrex::Real,max_prob_param> prob_param;
-            prob_param_fill(prob_param, initial_z);
+            prob_param_fill(prob_param);
 
-            amrex::ParallelFor(
-                               bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-                               prob_initdata
-                                   (i, j ,k, fab_S_new, fab_D_new, geomdata,prob_param);
-                               });
+            prob_initdata_on_box(bx, fab_S_new, fab_D_new, geomdata, prob_param);
+
+//          amrex::ParallelFor(
+//                             bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
+//                             prob_initdata
+//                                 (i, j ,k, fab_S_new, fab_D_new, geomdata,prob_param);
+//                             });
         }
 
         amrex::Gpu::Device::streamSynchronize();
@@ -824,20 +815,20 @@ Nyx::init_santa_barbara (int init_sb_vels)
         BL_PROFILE_VAR_STOP(CA_init);
 
         // Add the particle density to the gas density 
-        MultiFab::Add(S_new, *particle_mf[level], 0, Density, 1, 1);
+        MultiFab::Add(S_new, *particle_mf[level], 0, Density_comp, 1, 1);
 
         if (init_sb_vels == 1)
         {
             // Convert velocity to momentum
-            for (int i = 0; i < BL_SPACEDIM; ++i) {
+            for (int i = 0; i < AMREX_SPACEDIM; ++i) {
                MultiFab::Multiply(*particle_mf[level], *particle_mf[level], 0, 1+i, 1, 0);
             }
 
             // Add the particle momenta to the gas momenta (initially zero)
-            MultiFab::Add(S_new, *particle_mf[level], 1, Xmom, BL_SPACEDIM, S_new.nGrow());
+            MultiFab::Add(S_new, *particle_mf[level], 1, Xmom_comp, AMREX_SPACEDIM, S_new.nGrow());
         }
 
-        enforce_minimum_density_floor(S_new, -1e200, new_a, new_a);
+        enforce_minimum_density_floor(S_new, new_a);
     } else {
 
         MultiFab& S_new = get_new_data(State_Type);
@@ -852,22 +843,17 @@ Nyx::init_santa_barbara (int init_sb_vels)
 #ifndef CONST_SPECIES
        // Convert (rho X)_i to X_i before calling init_e_from_T
        for (int i = 0; i < NumSpec; ++i) 
-           MultiFab::Divide(S_new, S_new, Density, FirstSpec+i, 1, 0);
+           MultiFab::Divide(S_new, S_new, Density_comp, FirstSpec_comp+i, 1, 0);
 #endif
     }
-
-    // Make sure we've finished initializing the density before calling this.
-    MultiFab& S_new = get_new_data(State_Type);
-    MultiFab& D_new = get_new_data(DiagEOS_Type);
-    int ns = S_new.nComp();
-    int nd = D_new.nComp();
 
     init_e_from_T(a);
 
 #ifndef CONST_SPECIES
     // Convert X_i to (rho X)_i
+    MultiFab& S_new = get_new_data(State_Type);
     for (int i = 0; i < NumSpec; ++i) 
-        MultiFab::Multiply(S_new, S_new, Density, FirstSpec+i, 1, 0);
+        MultiFab::Multiply(S_new, S_new, Density_comp, FirstSpec_comp+i, 1, 0);
 #endif
 }
 #endif
@@ -1006,44 +992,41 @@ void
 Nyx::particle_est_time_step (Real& est_dt)
 {
     BL_PROFILE("Nyx::particle_est_time_step()");
-    if (DMPC && particle_move_type == "Gravitational")
+    const Real cur_time = state[PhiGrav_Type].curTime();
+    const Real a = get_comoving_a(cur_time);
+    MultiFab& grav = get_new_data(Gravity_Type);
+    const Real est_dt_particle = DMPC->estTimestep(grav, a, level, particle_cfl);
+
+    if (est_dt_particle > 0) {
+        est_dt = std::min(est_dt, est_dt_particle);
+    }
+
+#ifdef NEUTRINO_PARTICLES
+    const Real est_dt_neutrino = NPC->estTimestep(grav, a, level, neutrino_cfl);
+    if (est_dt_neutrino > 0) {
+        est_dt = std::min(est_dt, est_dt_neutrino);
+    }
+#endif
+
+    if (verbose)
     {
-        const Real cur_time = state[PhiGrav_Type].curTime();
-        const Real a = get_comoving_a(cur_time);
-        MultiFab& grav = get_new_data(Gravity_Type);
-        const Real est_dt_particle = DMPC->estTimestep(grav, a, level, particle_cfl);
-
-        if (est_dt_particle > 0) {
-            est_dt = std::min(est_dt, est_dt_particle);
-        }
-
-#ifdef NEUTRINO_PARTICLES
-        const Real est_dt_neutrino = NPC->estTimestep(grav, a, level, neutrino_cfl);
-        if (est_dt_neutrino > 0) {
-            est_dt = std::min(est_dt, est_dt_neutrino);
-        }
-#endif
-
-        if (verbose)
+        if (est_dt_particle > 0)
         {
-            if (est_dt_particle > 0)
-            {
-                amrex::Print() << "...estdt from particles at level "
-                          << level << ": " << est_dt_particle << '\n';
-            }
-            else
-            {
-                amrex::Print() << "...there are no particles at level "
-                          << level << '\n';
-            }
-#ifdef NEUTRINO_PARTICLES
-            if (est_dt_neutrino > 0)
-            {
-                amrex::Print() << "...estdt from neutrinos at level "
-                          << level << ": " << est_dt_neutrino << '\n';
-            }
-#endif
+            amrex::Print() << "...estdt from particles at level "
+                      << level << ": " << est_dt_particle << '\n';
         }
+        else
+            {
+            amrex::Print() << "...there are no particles at level "
+                      << level << '\n';
+        }
+#ifdef NEUTRINO_PARTICLES
+        if (est_dt_neutrino > 0)
+        {
+            amrex::Print() << "...estdt from neutrinos at level "
+                      << level << ": " << est_dt_neutrino << '\n';
+        }
+#endif
     }
 }
 
@@ -1138,7 +1121,6 @@ Nyx::particle_redistribute (int lbase, bool my_init)
             }
 
             int iteration = 1;
-            int finest_level = parent->finestLevel();
             for (int i = 0; i < theActiveParticles().size(); i++)
               {
                   theActiveParticles()[i]->Redistribute(lbase,
@@ -1161,18 +1143,6 @@ Nyx::particle_redistribute (int lbase, bool my_init)
             if (verbose)
                 amrex::Print() << "NOT calling redistribute because NOT changed " << '\n';
         }
-    }
-}
-
-void
-Nyx::particle_move_random ()
-{
-    BL_PROFILE("Nyx::particle_move_random()");
-    if (DMPC && particle_move_type == "Random")
-    {
-        BL_ASSERT(level == 0);
-
-        DMPC->MoveRandom();
     }
 }
 

@@ -44,7 +44,7 @@ using namespace ascent;
 using std::istream;
 using std::ostream;
 #ifdef AMREX_PARTICLES
-typedef NyxParticleContainer<1+BL_SPACEDIM+3> StellarParticleContainer;
+typedef NyxParticleContainer<1+AMREX_SPACEDIM+3> StellarParticleContainer;
 #endif
 #ifdef NO_HYDRO
 enum StateType {
@@ -52,7 +52,6 @@ enum StateType {
     Gravity_Type,
     NUM_STATE_TYPE
 };
-static int State_for_Time = PhiGrav_Type;
 static constexpr int max_prob_param = 1;
 #endif
 
@@ -67,7 +66,6 @@ enum StateType {
 #endif
     NUM_STATE_TYPE
 };
-static int State_for_Time = State_Type;
 static constexpr int max_prob_param = 20;
 #endif
 
@@ -147,6 +145,7 @@ public:
     static int write_hdf5;
 
     static int runlog_precision;
+    static int runlog_precision_terse;
 
     //
     //Define data descriptors.
@@ -377,11 +376,6 @@ public:
     void particle_redistribute(int lbase = 0, bool init = false);
 
     //
-    // Move randomly
-    //
-    void particle_move_random();
-
-    //
     // Initialize particle locations and velocities (and strengths if relevant)
     //
     virtual void init_particles();
@@ -556,21 +550,29 @@ public:
 
     void update_state_with_sources( amrex::MultiFab& S_old      , amrex::MultiFab& S_new,
                                     amrex::MultiFab& ext_src_old, amrex::MultiFab& hydro_src,
-                                    amrex::MultiFab& grav       ,
+                                    amrex::MultiFab& grav       , 
+#ifdef SDC
+                                    amrex::MultiFab& reset_e_src,
+#endif
                                     amrex::Real dt, amrex::Real a_old, amrex::Real a_new);
 
-    void enforce_minimum_density  ( amrex::MultiFab& S_old      , amrex::MultiFab& S_new,
-                                    amrex::Real dt, amrex::Real a_old, amrex::Real a_new);
-    void enforce_minimum_density_cons  ( amrex::MultiFab& S_old      , amrex::MultiFab& S_new,
-                                         amrex::Real dt, amrex::Real a_old, amrex::Real a_new);
-    void enforce_minimum_density_floor (                               amrex::MultiFab& S_new,
-                                         amrex::Real dt, amrex::Real a_old, amrex::Real a_new);
+    void enforce_minimum_density  ( amrex::MultiFab& S_old      , amrex::MultiFab& S_new, 
+#ifdef SDC
+                                    amrex::MultiFab& reset_e_src,
+#endif
+                                    amrex::Real a_new);
+#ifdef SDC
+    void enforce_minimum_density_cons  ( amrex::MultiFab& S_old      , amrex::MultiFab& S_new, amrex::MultiFab& reset_e_src);
+#else
+    void enforce_minimum_density_cons  ( amrex::MultiFab& S_old      , amrex::MultiFab& S_new);
+#endif
+    void enforce_minimum_density_floor ( amrex::MultiFab& S_new, amrex::Real a_new);
 
     void strang_first_step  (amrex::Real time, amrex::Real dt,  amrex::MultiFab& state, amrex::MultiFab&  dstate);
     void strang_second_step (amrex::Real time, amrex::Real dt,  amrex::MultiFab& state, amrex::MultiFab&  dstate);
 
     void sdc_reactions ( amrex::MultiFab& state_old, amrex::MultiFab& state_new, amrex::MultiFab&  dstate,
-                         amrex::MultiFab& hydro_src, amrex::MultiFab& IR,
+                         amrex::MultiFab& hydro_src, amrex::MultiFab& IR, amrex::MultiFab& reset_e_src,
                          amrex::Real dt, amrex::Real a_old, amrex::Real a_new,
                          int sdc_iter);
 
@@ -787,12 +789,15 @@ int integrate_state_struct
   #endif
 #endif
 #endif
+
     static int NUM_STATE;
 
     static int Zhi_comp;
 
     static int NumSpec;
     static amrex::Real gamma;
+    static amrex::Real h_species;
+    static amrex::Real he_species;
 
     static int strict_subcycling;
 
@@ -831,7 +836,6 @@ int integrate_state_struct
                               std::string &FullPath);
     //! Create the Level_ and other directories in checkpoint and plot files
     virtual void CreateLevelDirectory (const std::string &dir);
-
 
 protected:
 
@@ -874,7 +878,7 @@ protected:
     void set_small_values_given_average (amrex::Real average_dens, amrex::Real average_temp, amrex::Real a,
                                          amrex::Real & small_dens_inout, amrex::Real & small_temp_inout,
                                          amrex::Real &small_pres_inout, amrex::Real gamma_minus_1,
-                                         amrex::Real h_species, amrex::Real He_species);
+                                         amrex::Real h_species, amrex::Real he_species);
 
     void write_info();
 
@@ -913,18 +917,11 @@ protected:
 
     static amrex::Real large_temp;
 
-    static amrex::Real  h_species;
-    static amrex::Real he_species;
-
     static bool do_dm_particles;
 
     // How do we want to initialize the particles?
     // Must be "Random", "Cosmological" or "AsciiFile"
     static std::string particle_init_type;
-
-    // How do we want to move the particles?
-    // Must be "Random" or "Gravitational"
-    static std::string particle_move_type;
 
     // These control random initialization
     static bool particle_initrandom_serialize;
@@ -979,6 +976,9 @@ protected:
 
     // if true, use non-negative constraint on energy
     static int use_sundials_fused;
+
+    // specifies whether we allow tiling when calling the SUNDIALS integrator
+    static bool sundials_use_tiling;
 
     // specifies the memory priority
     static int minimize_memory;

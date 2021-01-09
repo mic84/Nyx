@@ -88,7 +88,10 @@ pc_plm_x(
   amrex::Real const cc,
   amrex::Real const a_old,
   amrex::Real const dx,
-  amrex::Real const dt, const int NumSpec,
+  amrex::Real const dt, 
+#ifndef CONST_SPECIES
+  const int NumSpec,
+#endif
   amrex::Real const gamma_minus_1,
   amrex::Real const small_dens,
   amrex::Real const small_pres)
@@ -208,8 +211,9 @@ pc_plm_x(
   // This allows the (rho e) to take advantage of (pressure > small_pres)
   qm(i + 1, j, k, QREINT ) = qm(i + 1, j, k, QPRES) / gamma_minus_1;
 
+#ifndef CONST_SPECIES
   // Upwind the passive variables
-  for (int n = FirstSpec; n < FirstSpec + NumSpec; ++n) {
+  for (int n = FirstSpec_comp; n < FirstSpec_comp + NumSpec; ++n) {
 
     u = q(i, j, k, QU);
 
@@ -225,6 +229,7 @@ pc_plm_x(
     // Left state
     qm(i + 1, j, k, n) = q(i, j, k, n) + acmpleft + 0.5 * dt * srcQ(i, j, k, n) / a_old;
   }
+#endif
 }
 
 AMREX_GPU_DEVICE
@@ -242,7 +247,10 @@ pc_plm_y(
   amrex::Real const cc,
   amrex::Real const a_old,
   amrex::Real const dy,
-  amrex::Real const dt, const int NumSpec,
+  amrex::Real const dt,
+#ifndef CONST_SPECIES
+  const int NumSpec,
+#endif
   amrex::Real const gamma_minus_1,
   amrex::Real const small_dens,
   amrex::Real const small_pres)
@@ -361,8 +369,9 @@ pc_plm_y(
   // This allows the (rho e) to take advantage of (pressure > small_pres)
   qm(i, j + 1, k, QREINT ) = qm(i, j + 1, k, QPRES) / gamma_minus_1;
 
+#ifndef CONST_SPECIES
   // Upwind the passive variables
-  for (int n = FirstSpec; n < FirstSpec + NumSpec; ++n) {
+  for (int n = FirstSpec_comp; n < FirstSpec_comp + NumSpec; ++n) {
 
     // Right state
     v = q(i, j, k, QV);
@@ -374,6 +383,7 @@ pc_plm_y(
     amrex::Real acmpbot = 0.5 * (1.0 - spzerob) * slope[n];
     qm(i, j + 1, k, n) = q(i, j, k, n) + acmpbot + 0.5 * dt * srcQ(i, j, k, n) / a_old;
   }
+#endif
 }
 
 AMREX_GPU_DEVICE
@@ -391,7 +401,10 @@ pc_plm_z(
   amrex::Real const cc,
   amrex::Real const a_old,
   amrex::Real const dz,
-  amrex::Real const dt, const int NumSpec,
+  amrex::Real const dt,
+#ifndef CONST_SPECIES
+  const int NumSpec,
+#endif
   amrex::Real const gamma_minus_1,
   amrex::Real const small_dens,
   amrex::Real const small_pres)
@@ -511,8 +524,9 @@ pc_plm_z(
   // This allows the (rho e) to take advantage of (pressure > small_pres)
   qm(i, j, k + 1, QREINT ) = qm(i, j, k + 1, QPRES) / gamma_minus_1;
 
+#ifndef CONST_SPECIES
   // Upwind the passive variables
-  for (int n = FirstSpec; n < FirstSpec + NumSpec; ++n) {
+  for (int n = FirstSpec_comp; n < FirstSpec_comp + NumSpec; ++n) {
 
     // Right state
     w = q(i, j, k, QW);
@@ -524,5 +538,6 @@ pc_plm_z(
     amrex::Real acmpbot = 0.5 * (1.0 - spzerob) * slope[n];
     qm(i, j, k + 1, n) = q(i, j, k, n) + acmpbot + 0.5 * dt * srcQ(i, j, k, n) / a_old;
   }
+#endif
 }
 #endif

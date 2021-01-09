@@ -52,8 +52,10 @@ void Nyx::set_small_values_given_average (amrex::Real average_dens, amrex::Real 
     Real dummy_small_pres=0.0;
     Real eint=0.0;
     auto atomic_rates = atomic_rates_glob;
+
     if (!(pp_nyx.query("small_pres", dummy_small_pres)))
-        nyx_eos_given_RT(atomic_rates, gamma_minus_1_in, h_species_in, &eint, &small_pres, small_dens, small_temp, typical_Ne, a);
+        nyx_eos_given_RT(atomic_rates, gamma_minus_1_in, h_species_in, &eint, 
+                         &small_pres, small_dens, small_temp, typical_Ne, a);
     else
         small_pres = small_pres_inout;
 
@@ -264,13 +266,10 @@ Nyx::initData ()
                 const auto fab_D_new=D_new.array(mfi);
 
                 GpuArray<amrex::Real,max_prob_param> prob_param;
-                prob_param_fill(prob_param, initial_z);
+                prob_param_fill(prob_param);
+                prob_param_special_fill(prob_param);
 
-                amrex::ParallelFor(
-                                   bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-                                   prob_initdata
-                                       (i, j ,k, fab_S_new, fab_D_new, geomdata, prob_param);
-                               });
+                prob_initdata_on_box(bx, fab_S_new, fab_D_new, geomdata, prob_param);
             }
 
             if (inhomo_reion) init_zhi();
@@ -296,12 +295,10 @@ Nyx::initData ()
                 const auto fab_S_new=S_new.array(mfi);                
 
                 GpuArray<amrex::Real,max_prob_param> prob_param;
-                prob_param_fill(prob_param, initial_z);
-                amrex::ParallelFor(
-                                   bx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
-                                   prob_initdata_state
-                                      (i, j ,k, fab_S_new, geomdata, prob_param);
-                               });
+                prob_param_fill(prob_param);
+                prob_param_special_fill(prob_param);
+
+                prob_initdata_state_on_box(bx, fab_S_new, geomdata, prob_param);
             }
         }
     }
@@ -326,15 +323,19 @@ Nyx::initData ()
         Phi_new.setVal(0.);
     }
 
+#ifndef NO_HYDRO
+
 #ifdef SDC
     //
     // Initialize this to zero before we use it in advance
     //
-    MultiFab& IR_new = get_new_data(SDC_IR_Type);
-    IR_new.setVal(0.0);
+    if (do_hydro)
+    {
+        MultiFab& IR_new = get_new_data(SDC_IR_Type);
+        IR_new.setVal(0.0);
+    }
 #endif
 
-#ifndef NO_HYDRO
     //
     // Read in initial conditions from a file.
     // By now only for fixed grid ics.
@@ -352,7 +353,9 @@ Nyx::initData ()
         MultiFab& S_new_crse = get_level(0).get_new_data(State_Type);
         
         S_new_crse.copy(mf, 0, 0, 6);
-        S_new_crse.copy(mf, 0, FirstSpec, 1);
+#ifndef CONST_SPECIES
+        S_new_crse.copy(mf, 0, FirstSpec_comp, 1);
+#endif
 
         if (do_hydro == 1) 
         {
@@ -468,7 +471,7 @@ Nyx::init_from_plotfile ()
         int nd = D_new.nComp();
 
         // Construct internal energy given density, temperature and species
-        if (not rhoe_infile)
+        if (! rhoe_infile)
            init_e_from_T(old_a);
 
         // Define (rho E) given (rho e) and the momenta
@@ -504,10 +507,10 @@ Nyx::check_initial_species ()
     if (amrex::Math::abs(1.0 - h_species - he_species) > 1.e-8)
         amrex::Abort("Error:: Failed check of initial species summing to 1");
 #else
-    int iden  = Density;
-    if (FirstSpec > 0)
+    int iden  = Density_comp;
+    if (FirstSpec_comp > 0)
     {
-        int iufs = FirstSpec;
+        int iufs = FirstSpec_comp;
         int nspec = NumSpec;
         MultiFab&   S_new    = get_new_data(State_Type);
 #ifdef _OPENMP
@@ -563,7 +566,7 @@ Nyx::init_e_from_T (const Real& a)
 
         amrex::ParallelFor(bx, [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
         {
-             Real rho = s_arr(i,j,k,Density);
+             Real rho = s_arr(i,j,k,Density_comp);
              Real T   = d_arr(i,j,k,Temp_comp);
              Real ne  = d_arr(i,j,k,  Ne_comp);
 
@@ -574,12 +577,12 @@ Nyx::init_e_from_T (const Real& a)
              // Set temp to small_temp and compute corresponding internal energy
              nyx_eos_given_RT(atomic_rates, gamma_minus_1_in, h_species_in, &eint, &dummy_pres, rho, T, ne, a);
 
-             s_arr(i,j,k,Eint) = s_arr(i,j,k,Density) * eint;
+             s_arr(i,j,k,Eint_comp) = s_arr(i,j,k,Density_comp) * eint;
 
-             s_arr(i,j,k,Eden) = s_arr(i,j,k,Eint) + 0.5 * ( 
-                                 s_arr(i,j,k,Xmom)*s_arr(i,j,k,Xmom) +
-                                 s_arr(i,j,k,Ymom)*s_arr(i,j,k,Ymom) +
-                                 s_arr(i,j,k,Zmom)*s_arr(i,j,k,Zmom) ) / s_arr(i,j,k,Density);
+             s_arr(i,j,k,Eden_comp) = s_arr(i,j,k,Eint_comp) + 0.5 * ( 
+                                 s_arr(i,j,k,Xmom_comp)*s_arr(i,j,k,Xmom_comp) +
+                                 s_arr(i,j,k,Ymom_comp)*s_arr(i,j,k,Ymom_comp) +
+                                 s_arr(i,j,k,Zmom_comp)*s_arr(i,j,k,Zmom_comp) ) / s_arr(i,j,k,Density_comp);
         });
         amrex::Gpu::Device::streamSynchronize();
     }

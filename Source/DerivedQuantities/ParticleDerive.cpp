@@ -107,7 +107,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 0, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 0, 0, 1, 0, 0);
 
         return derive_dat;
     }
@@ -128,7 +128,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 1, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 1, 0, 1, 0, 0);
 
         return derive_dat;
     }
@@ -149,7 +149,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 2, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 2, 0, 1, 0, 0);
 
         return derive_dat;
     }
@@ -170,7 +170,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 3, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 3, 0, 1, 0, 0);
 
         return derive_dat;
     }
@@ -192,7 +192,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 0, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 0, 0, 1, 0, 0);
 
         return derive_dat;
     }
@@ -215,7 +215,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 0, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 0, 0, 1, 0, 0);
 
         return derive_dat;
     }
@@ -237,7 +237,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 1, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 1, 0, 1, 0, 0);
 
         return derive_dat;
     }
@@ -258,7 +258,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 2, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 2, 0, 1, 0, 0);
 
         return derive_dat;
     }
@@ -279,7 +279,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 3, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 3, 0, 1, 0, 0);
 
         return derive_dat;
     }
@@ -302,7 +302,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 0, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 0, 0, 1, 0, 0);
 
         return derive_dat;
     }
@@ -328,7 +328,7 @@ Nyx::particle_derive (const std::string& name, Real time, int ngrow)
                                  parent->refRatio(lev));
         }
 
-        MultiFab::Copy(*derive_dat, *particle_mf[level], 0, 0, 1, 0);
+        derive_dat->ParallelCopy(*particle_mf[level], 0, 0, 1, 0, 0);
 
 #ifndef NO_HYDRO
         std::unique_ptr<MultiFab> gas_density = derive("density",time,0);
@@ -353,8 +353,8 @@ extern "C"
 {
 #endif
 
-  void dernull(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-               const FArrayBox& datfab, const Geometry& geomdata,
+  void dernull(const Box& /*bx*/, FArrayBox& /*derfab*/, int /*dcomp*/, int /*ncomp*/,
+               const FArrayBox& /*datfab*/, const Geometry& /*geomdata*/,
                Real /*time*/, const int* /*bcrec*/, int /*level*/)
   {
 
@@ -362,8 +362,8 @@ extern "C"
 
   }
 
-    void dermaggrav(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                    const FArrayBox& datfab, const Geometry& geomdata,
+    void dermaggrav(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                    const FArrayBox& datfab, const Geometry& /*geomdata*/,
                     Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
@@ -381,7 +381,7 @@ extern "C"
       });
     }
 
-    void derdenvol(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
+    void derdenvol(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
                    const FArrayBox& datfab, const Geometry& geomdata,
                    Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
@@ -391,7 +391,7 @@ extern "C"
 
       auto const dx = geomdata.CellSizeArray();
 
-      // Here dat contains (Density, Xmom, Ymom, Zmom)
+      // Here dat contains (Density, Xmom, Ymom, Zmom_comp)
       const Real V_cell = dx[0] * dx[1] * dx[2];
       amrex::ParallelFor(bx,
       [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
@@ -402,17 +402,15 @@ extern "C"
       });
     }
 
-    void deroverden(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                    const FArrayBox& datfab, const Geometry& geomdata,
+    void deroverden(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                    const FArrayBox& datfab, const Geometry& /*geomdata*/,
                     Real /*time*/, const int* /*bcrec*/, int level)
     {
 
       auto const dat = datfab.array();
       auto const der = derfab.array();
 
-      auto const dx = geomdata.CellSizeArray();
-
-      // Here dat contains (Density, Xmom, Ymom, Zmom)
+      // Here dat contains (Density, Xmom, Ymom, Zmom_comp)
       const Real over_den = Nyx::average_total_density * std::pow(Nyx::tagging_base,level+1);
 
       amrex::ParallelFor(bx,
@@ -424,26 +422,20 @@ extern "C"
       });
     }
 
-    void deroverdenzoom(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                        const FArrayBox& datfab, const Geometry& geomdata,
+    void deroverdenzoom(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                        const FArrayBox& /*datfab*/, const Geometry& geomdata,
                         Real /*time*/, const int* /*bcrec*/, int level)
     {
-
-      auto const dat = datfab.array();
       auto const der = derfab.array();
-
-      auto const dx = geomdata.CellSizeArray();
 
       //Assume Domain is a cube
       int idim = 0;
       int domlo = geomdata.Domain().smallEnd(idim);
       int domhi = geomdata.Domain().bigEnd(idim);
 
-      int ref_size = domhi / (2*std::pow(2,(level+1)));
+      int ref_size = domhi / (2*static_cast<int>(std::round(std::pow(2,(level+1)))));
       int center   = (domhi-domlo+1) / 2;
 
-      int ilo      = amrex::max(center-ref_size+1, bx.smallEnd(idim));
-      int ihi      = amrex::min(center+ref_size,   bx.bigEnd(idim));
       auto const bx_ref = Box(IntVect(AMREX_D_DECL(amrex::max(center-ref_size+1, bx.smallEnd(0)),
                                                    amrex::max(center-ref_size+1, bx.smallEnd(1)),
                                                    amrex::max(center-ref_size+1, bx.smallEnd(2)))),

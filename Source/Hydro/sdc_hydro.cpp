@@ -49,7 +49,7 @@ Nyx::sdc_hydro (Real time,
        get_old_source(prev_time, dt, ext_src_old);
 
     // Define the gravity vector
-    MultiFab grav_vector(grids, dmap, BL_SPACEDIM, NUM_GROW);
+    MultiFab grav_vector(grids, dmap, AMREX_SPACEDIM, NUM_GROW);
     grav_vector.setVal(0.);
 
     if (do_grav)
@@ -81,8 +81,8 @@ Nyx::sdc_hydro (Real time,
        MultiFab IR_tmp(grids, dmap, 1, NUM_GROW);
        FillPatch(*this, IR_tmp, NUM_GROW, time, SDC_IR_Type, 0, 1);
 
-       MultiFab::Add(ext_src_old,IR_tmp,0,Eden,1,0);
-       MultiFab::Add(ext_src_old,IR_tmp,0,Eint,1,0);
+       MultiFab::Add(ext_src_old,IR_tmp,0,Eden_comp,1,0);
+       MultiFab::Add(ext_src_old,IR_tmp,0,Eint_comp,1,0);
 
        ext_src_old.FillBoundary(geom.periodicity());
 
@@ -93,13 +93,19 @@ Nyx::sdc_hydro (Real time,
                               init_flux_register, add_to_flux_register);
 
        // We subtract IR_tmp before we add the rest of the source term to (rho e) and (rho E)
-       MultiFab::Subtract(ext_src_old,IR_tmp,0,Eden,1,0);
-       MultiFab::Subtract(ext_src_old,IR_tmp,0,Eint,1,0);
+       MultiFab::Subtract(ext_src_old,IR_tmp,0,Eden_comp,1,0);
+       MultiFab::Subtract(ext_src_old,IR_tmp,0,Eint_comp,1,0);
 
        ext_src_old.FillBoundary(geom.periodicity());
-              
+       // First reset internal energy before call to compute_temp
+       MultiFab reset_e_src(S_new.boxArray(), S_new.DistributionMap(), 1, NUM_GROW);
+       reset_e_src.setVal(0.0);
+
        update_state_with_sources(S_old_tmp,S_new,
                                  ext_src_old,hydro_src,grav_vector,
+#ifdef SDC
+                                 reset_e_src,
+#endif
                                  dt,a_old,a_new);
 
        // We copy old Temp and Ne to new Temp and Ne so that they can be used
@@ -109,7 +115,7 @@ Nyx::sdc_hydro (Real time,
        // This step needs to do the update of (rho),  (rho e) and (rho E)
        //      AND  needs to return an updated value of I_R in the old SDC_IR statedata.
        BL_PROFILE_VAR("sdc_reactions", sdc_reactions);
-       sdc_reactions(S_old_tmp, S_new, D_new, hydro_src, IR_old, dt, a_old, a_new, sdc_iter);
+       sdc_reactions(S_old_tmp, S_new, D_new, hydro_src, IR_old, reset_e_src, dt, a_old, a_new, sdc_iter);
        BL_PROFILE_VAR_STOP(sdc_reactions);
 
 #if 0

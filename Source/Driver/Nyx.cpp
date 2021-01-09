@@ -125,6 +125,8 @@ int Nyx::sundials_alloc_type = 0;
 int Nyx::minimize_memory = 0;
 int Nyx::shrink_to_fit = 0;
 
+bool Nyx::sundials_use_tiling = true;
+
 int Nyx::strang_split = 1;
 int Nyx::strang_fuse = 0;
 int Nyx::strang_grown_box = 1;
@@ -183,7 +185,10 @@ Real Nyx::mass_seed         = 1.e5;
 #endif
 
 // The default for how many digits to use for each column in the runlog
+// We have a second parameter (rlp_terse) for regression-testing those quantities 
+//    which show more variation than others
 int Nyx::runlog_precision = 6;
+int Nyx::runlog_precision_terse = 6;
 
 int Nyx::write_parameters_in_plotfile = true;
 int Nyx::write_skip_prepost = 0;
@@ -260,10 +265,10 @@ Nyx::read_params ()
     pp_nyx.get("dt_cutoff", dt_cutoff);
 
     // Get boundary conditions
-    Vector<int> lo_bc(BL_SPACEDIM), hi_bc(BL_SPACEDIM);
-    pp_nyx.getarr("lo_bc", lo_bc, 0, BL_SPACEDIM);
-    pp_nyx.getarr("hi_bc", hi_bc, 0, BL_SPACEDIM);
-    for (int i = 0; i < BL_SPACEDIM; i++)
+    Vector<int> lo_bc(AMREX_SPACEDIM), hi_bc(AMREX_SPACEDIM);
+    pp_nyx.getarr("lo_bc", lo_bc, 0, AMREX_SPACEDIM);
+    pp_nyx.getarr("hi_bc", hi_bc, 0, AMREX_SPACEDIM);
+    for (int i = 0; i < AMREX_SPACEDIM; i++)
     {
         phys_bc.setLo(i, lo_bc[i]);
         phys_bc.setHi(i, hi_bc[i]);
@@ -278,7 +283,7 @@ Nyx::read_params ()
         //
         // Do idiot check.  Periodic means interior in those directions.
         //
-        for (int dir = 0; dir < BL_SPACEDIM; dir++)
+        for (int dir = 0; dir < AMREX_SPACEDIM; dir++)
         {
             if (DefaultGeometry().isPeriodic(dir))
             {
@@ -304,7 +309,7 @@ Nyx::read_params ()
         //
         // Do idiot check.  If not periodic, should be no interior.
         //
-        for (int dir = 0; dir < BL_SPACEDIM; dir++)
+        for (int dir = 0; dir < AMREX_SPACEDIM; dir++)
         {
             if (lo_bc[dir] == Interior)
             {
@@ -344,6 +349,7 @@ Nyx::read_params ()
     pp_nyx.query("strict_subcycling",strict_subcycling);
 
     pp_nyx.query("runlog_precision",runlog_precision);
+    pp_nyx.query("runlog_precision_terse",runlog_precision_terse);
 
     pp_nyx.query("write_parameter_file",write_parameters_in_plotfile);
     if(pp_nyx.query("write_hdf5",write_hdf5))
@@ -527,6 +533,8 @@ Nyx::read_hydro_params ()
     pp_nyx.query("enforce_min_density_type", enforce_min_density_type);
     pp_nyx.query("use_analriem", use_analriem);
 
+    pp_nyx.query("sundials_use_tiling", sundials_use_tiling);
+
     if (use_typical_steps != 0 && strang_grown_box == 0)
     {
           amrex::Error("Nyx::use_typical_steps must be 0 with strang_grown_box = 0");
@@ -614,7 +622,7 @@ Nyx::Nyx (Amr&            papa,
         if (forcing == 0)
            forcing = new StochasticForcing();
 
-        forcing->init(BL_SPACEDIM, prob_lo, prob_hi);
+        forcing->init(AMREX_SPACEDIM, prob_lo, prob_hi);
     }
 #endif
 
@@ -689,7 +697,7 @@ Nyx::restart (Amr&     papa,
         if (forcing == 0)
            forcing = new StochasticForcing();
 
-        forcing->init(BL_SPACEDIM, prob_lo, prob_hi);
+        forcing->init(AMREX_SPACEDIM, prob_lo, prob_hi);
     }
 #endif
 }
@@ -724,8 +732,13 @@ Nyx::init (AmrLevel& old)
     //
     Real dt_new = parent->dtLevel(level);
 
-    Real cur_time  = old_level->state[State_for_Time].curTime();
-    Real prev_time = old_level->state[State_for_Time].prevTime();
+#ifndef NO_HYDRO
+    Real cur_time  = old_level->state[State_Type].curTime();
+    Real prev_time = old_level->state[State_Type].prevTime();
+#else
+    Real cur_time  = old_level->state[PhiGrav_Type].curTime();
+    Real prev_time = old_level->state[PhiGrav_Type].prevTime();
+#endif
 
     Real dt_old = cur_time - prev_time;
     setTimeLevel(cur_time, dt_old, dt_new);
@@ -746,10 +759,13 @@ Nyx::init (AmrLevel& old)
     }
 #endif
 
+    MultiFab& Phi_new = get_new_data(PhiGrav_Type);
     if (do_grav)
     {
-        MultiFab& Phi_new = get_new_data(PhiGrav_Type);
         FillPatch(old, Phi_new, 0, cur_time, PhiGrav_Type, 0, 1);
+    } else {
+        // We need to initialize it otherwise we might write out NaNs in the checkpoint 
+        Phi_new.setVal(0.);
     }
 
 #ifdef SDC
@@ -771,8 +787,13 @@ Nyx::init ()
     BL_PROFILE("Nyx::init()");
     Real dt        = parent->dtLevel(level);
 
-    Real cur_time  = get_level(level-1).state[State_for_Time].curTime();
-    Real prev_time = get_level(level-1).state[State_for_Time].prevTime();
+#ifndef NO_HYDRO
+    Real cur_time  = get_level(level-1).state[State_Type].curTime();
+    Real prev_time = get_level(level-1).state[State_Type].prevTime();
+#else
+    Real cur_time  = get_level(level-1).state[PhiGrav_Type].curTime();
+    Real prev_time = get_level(level-1).state[PhiGrav_Type].prevTime();
+#endif
 
     Real dt_old    = (cur_time - prev_time) / (Real)parent->MaxRefRatio(level-1);
 
@@ -807,10 +828,13 @@ Nyx::init ()
     }
 #endif
 
+    MultiFab& Phi_new = get_new_data(PhiGrav_Type);
     if (do_grav)
     {
-        MultiFab& Phi_new = get_new_data(PhiGrav_Type);
         FillCoarsePatch(Phi_new, 0, cur_time, PhiGrav_Type, 0, Phi_new.nComp());
+    } else {
+        // We need to initialize it otherwise we might write out NaNs in the checkpoint 
+        Phi_new.setVal(0.);
     }
 
 #ifdef SDC
@@ -850,7 +874,7 @@ Nyx::initial_time_step ()
 }
 
 Real
-Nyx::est_time_step (Real dt_old)
+Nyx::est_time_step (Real /*dt_old*/)
 {
     BL_PROFILE("Nyx::est_time_step()");
     if (fixed_dt > 0)
@@ -863,7 +887,11 @@ Nyx::est_time_step (Real dt_old)
     const MultiFab& stateMF = get_new_data(State_Type);
 #endif
 
-    Real cur_time = state[State_for_Time].curTime();
+#ifndef NO_HYDRO
+    Real cur_time = state[State_Type].curTime();
+#else
+    Real cur_time = state[PhiGrav_Type].curTime();
+#endif
 
 #ifndef NO_HYDRO
     if (do_hydro)
@@ -893,16 +921,16 @@ Nyx::est_time_step (Real dt_old)
                   for         (int k = lo.z; k <= hi.z; ++k) {
                     for     (int j = lo.y; j <= hi.y; ++j) {
                       for (int i = lo.x; i <= hi.x; ++i) {
-                        if(u(i,j,k,Density)<=1.1*local_small_dens && local_max_temp_dt==1)
+                        if(u(i,j,k,Density_comp)<=1.1*local_small_dens && local_max_temp_dt==1)
                           continue;
 
-                            Real rhoInv = 1.0 / u(i,j,k,Density);
-                            Real ux     = u(i,j,k,Xmom)*rhoInv;
-                            Real uy     = u(i,j,k,Ymom)*rhoInv;
-                            Real uz     = u(i,j,k,Zmom)*rhoInv;
+                            Real rhoInv = 1.0 / u(i,j,k,Density_comp);
+                            Real ux     = u(i,j,k,Xmom_comp)*rhoInv;
+                            Real uy     = u(i,j,k,Ymom_comp)*rhoInv;
+                            Real uz     = u(i,j,k,Zmom_comp)*rhoInv;
 
                             // Use internal energy for calculating dt
-                            Real e  = u(i,j,k,Eint)*rhoInv;
+                            Real e  = u(i,j,k,Eint_comp)*rhoInv;
 
                             Real c;
                             // Protect against negative e
@@ -911,7 +939,7 @@ Nyx::est_time_step (Real dt_old)
                               c=sound_speed_factor*std::sqrt(e);
 #else
                             if (e > 0.0)
-                              c=sound_speed_factor*std::sqrt(u(i,j,k,Density)*e/u(i,j,k,Density));
+                              c=sound_speed_factor*std::sqrt(u(i,j,k,Density_comp)*e/u(i,j,k,Density_comp));
 #endif
                             else
                               c = 0.0;
@@ -958,14 +986,14 @@ Nyx::est_time_step (Real dt_old)
 }
 
 void
-Nyx::computeNewDt (int                   finest_level,
-                   int                   sub_cycle,
-                   Vector<int>&           n_cycle,
-                   const Vector<IntVect>& ref_ratio,
-                   Vector<Real>&          dt_min,
-                   Vector<Real>&          dt_level,
-                   Real                  stop_time,
-                   int                   post_regrid_flag)
+Nyx::computeNewDt (int                      finest_level,
+                   int                    /*sub_cycle*/,
+                   Vector<int>&             n_cycle,
+                   const Vector<IntVect>& /*ref_ratio*/,
+                   Vector<Real>&            dt_min,
+                   Vector<Real>&            dt_level,
+                   Real                     stop_time,
+                   int                      post_regrid_flag)
 {
     BL_PROFILE("Nyx::computeNewDt()");
     //
@@ -1012,30 +1040,34 @@ Nyx::computeNewDt (int                   finest_level,
                 (parent->subcyclingMode() == "Optimal") &&
                 (parent->okToRegrid(level) || parent->levelSteps(0) == 0) )
             {
-                int new_cycle[finest_level+1];
+                Vector<int> new_cycle(finest_level+1);
                 for (i = 0; i <= finest_level; i++)
                     new_cycle[i] = n_cycle[i];
                 // The max allowable dt
-                Real dt_max[finest_level+1];
+                Vector<Real> dt_max(finest_level+1);
                 for (i = 0; i <= finest_level; i++)
                 {
                     dt_max[i] = dt_min[i];
                 }
                 // find the maximum number of cycles allowed.
-                int cycle_max[finest_level+1];
+                Vector<int> cycle_max(finest_level+1);
                 cycle_max[0] = 1;
                 for (i = 1; i <= finest_level; i++)
                 {
                     cycle_max[i] = parent->MaxRefRatio(i-1);
                 }
                 // estimate the amout of work to advance each level.
-                Real est_work[finest_level+1];
+                Vector<Real> est_work(finest_level+1);
                 for (i = 0; i <= finest_level; i++)
                 {
                     est_work[i] = parent->getLevel(i).estimateWork();
                 }
-                // this value will be used only if the subcycling pattern is changed.
-                dt_0 = parent->computeOptimalSubcycling(finest_level+1, new_cycle, dt_max, est_work, cycle_max);
+
+                // This value will be used only if the subcycling pattern is changed.
+
+                dt_0 = parent->computeOptimalSubcycling(finest_level+1, new_cycle.dataPtr(), dt_max.dataPtr(), 
+                                                        est_work.dataPtr(), cycle_max.dataPtr());
+
                 for (i = 0; i <= finest_level; i++)
                 {
                     if (n_cycle[i] != new_cycle[i])
@@ -1099,7 +1131,11 @@ Nyx::computeNewDt (int                   finest_level,
     // Limit dt's by the value of stop_time.
     //
     const Real eps = 0.001 * dt_0;
-    Real cur_time = state[State_for_Time].curTime();
+#ifndef NO_HYDRO
+    Real cur_time = state[State_Type].curTime();
+#else
+    Real cur_time = state[PhiGrav_Type].curTime();
+#endif
     if (stop_time >= 0.0)
     {
         if ((cur_time + dt_0) > (stop_time - eps))
@@ -1138,12 +1174,12 @@ Nyx::computeNewDt (int                   finest_level,
 }
 
 void
-Nyx::computeInitialDt (int                   finest_level,
-                       int                   sub_cycle,
-                       Vector<int>&           n_cycle,
-                       const Vector<IntVect>& ref_ratio,
-                       Vector<Real>&          dt_level,
-                       Real                  stop_time)
+Nyx::computeInitialDt (int                      finest_level,
+                       int                    /*sub_cycle*/,
+                       Vector<int>&             n_cycle,
+                       const Vector<IntVect>& /*ref_ratio*/,
+                       Vector<Real>&            dt_level,
+                       Real                     stop_time)
 {
     BL_PROFILE("Nyx::computeInitialDt()");
     //
@@ -1157,28 +1193,31 @@ Nyx::computeInitialDt (int                   finest_level,
     int n_factor = 1;
     if (parent->subcyclingMode() == "Optimal")
     {
-        int new_cycle[finest_level+1];
+        Vector<int> new_cycle(finest_level+1);
         for (i = 0; i <= finest_level; i++)
             new_cycle[i] = n_cycle[i];
-        Real dt_max[finest_level+1];
+        Vector<Real> dt_max(finest_level+1);
         for (i = 0; i <= finest_level; i++)
         {
             dt_max[i] = get_level(i).initial_time_step();
         }
         // Find the maximum number of cycles allowed
-        int cycle_max[finest_level+1];
+        Vector<int> cycle_max(finest_level+1);
         cycle_max[0] = 1;
         for (i = 1; i <= finest_level; i++)
         {
             cycle_max[i] = parent->MaxRefRatio(i-1);
         }
         // estimate the amout of work to advance each level.
-        Real est_work[finest_level+1];
+        Vector<Real> est_work(finest_level+1);
         for (i = 0; i <= finest_level; i++)
         {
             est_work[i] = parent->getLevel(i).estimateWork();
         }
-        dt_0 = parent->computeOptimalSubcycling(finest_level+1, new_cycle, dt_max, est_work, cycle_max);
+
+        dt_0 = parent->computeOptimalSubcycling(finest_level+1, new_cycle.dataPtr(), dt_max.dataPtr(), 
+                                                est_work.dataPtr(), cycle_max.dataPtr());
+
         for (i = 0; i <= finest_level; i++)
         {
             n_cycle[i] = new_cycle[i];
@@ -1203,7 +1242,11 @@ Nyx::computeInitialDt (int                   finest_level,
     // Limit dt's by the value of stop_time.
     //
     const Real eps = 0.001 * dt_0;
-    Real cur_time = state[State_for_Time].curTime();
+#ifndef NO_HYDRO
+    Real cur_time = state[State_Type].curTime();
+#else
+    Real cur_time = state[PhiGrav_Type].curTime();
+#endif
     if (stop_time >= 0)
     {
         if ((cur_time + dt_0) > (stop_time - eps))
@@ -1231,8 +1274,13 @@ Nyx::writePlotNow ()
 
     if (plot_z_values.size() > 0)
     {
-        Real prev_time = state[State_for_Time].prevTime();
-        Real  cur_time = state[State_for_Time].curTime();
+#ifndef NO_HYDRO
+        Real prev_time = state[State_Type].prevTime();
+        Real  cur_time = state[State_Type].curTime();
+#else
+        Real prev_time = state[PhiGrav_Type].prevTime();
+        Real  cur_time = state[PhiGrav_Type].curTime();
+#endif
 
         Real a_old = get_comoving_a(prev_time);
         Real z_old = (1. / a_old) - 1.;
@@ -1266,8 +1314,13 @@ Nyx::doAnalysisNow ()
     if (analysis_z_values.size() > 0)
     {
 
-        Real prev_time = state[State_for_Time].prevTime();
-        Real  cur_time = state[State_for_Time].curTime();
+#ifndef NO_HYDRO
+        Real prev_time = state[State_Type].prevTime();
+        Real  cur_time = state[State_Type].curTime();
+#else
+        Real prev_time = state[PhiGrav_Type].prevTime();
+        Real  cur_time = state[PhiGrav_Type].curTime();
+#endif
 
         Real a_old = get_comoving_a(prev_time);
         Real z_old = (1. / a_old) - 1.;
@@ -1332,7 +1385,7 @@ Nyx::post_timestep (int iteration)
     // Sync up if we're level 0 or if we have particles that may have moved
     // off the next finest level and need to be added to our own level.
     //
-    if ((iteration < ncycle and level < finest_level) || level == 0)
+    if ((iteration < ncycle && level < finest_level) || level == 0)
     {
         for (int i = 0; i < theActiveParticles().size(); i++)
         {
@@ -1365,9 +1418,9 @@ Nyx::post_timestep (int iteration)
         if (do_grav)
         {
             // Define the update to rho and rhoU due to refluxing.
-            drho_and_drhoU.define(grids, dmap, BL_SPACEDIM + 1, 0);
-            MultiFab::Copy(drho_and_drhoU, S_new_crse, Density, 0,
-                           BL_SPACEDIM + 1, 0);
+            drho_and_drhoU.define(grids, dmap, AMREX_SPACEDIM + 1, 0);
+            MultiFab::Copy(drho_and_drhoU, S_new_crse, Density_comp, 0,
+                           AMREX_SPACEDIM + 1, 0);
             drho_and_drhoU.mult(-1.0);
         }
 
@@ -1389,7 +1442,7 @@ Nyx::post_timestep (int iteration)
 
         if (do_grav && gravity->get_no_sync() == 0)
         {
-            MultiFab::Add(drho_and_drhoU, S_new_crse, Density, 0, BL_SPACEDIM+1, 0);
+            MultiFab::Add(drho_and_drhoU, S_new_crse, Density_comp, 0, AMREX_SPACEDIM+1, 0);
 
             MultiFab dphi(grids, dmap, 1, 0);
             dphi.setVal(0);
@@ -1403,7 +1456,7 @@ Nyx::post_timestep (int iteration)
                 grad_delta_phi_cc[lev-level].reset(
                                       new MultiFab(get_level(lev).boxArray(),
                                                    get_level(lev).DistributionMap(),
-                                                   BL_SPACEDIM, 0));
+                                                   AMREX_SPACEDIM, 0));
                 grad_delta_phi_cc[lev-level]->setVal(0);
             }
 
@@ -1420,7 +1473,7 @@ Nyx::post_timestep (int iteration)
 
                 const auto& ba = get_level(lev).boxArray();
                 const auto& dm = get_level(lev).DistributionMap();
-                MultiFab grad_phi_cc(ba, dm, BL_SPACEDIM, 0);
+                MultiFab grad_phi_cc(ba, dm, AMREX_SPACEDIM, 0);
                 gravity->get_new_grav_vector(lev, grad_phi_cc, cur_time);
 
 #ifdef _OPENMP
@@ -1433,7 +1486,7 @@ Nyx::post_timestep (int iteration)
                   {
                     const Box& bx = mfi.tilebox();
 
-                    dstate.resize(bx, BL_SPACEDIM + 1);
+                    dstate.resize(bx, AMREX_SPACEDIM + 1);
                     Array4<Real> d_fab = dstate.array();
 
                     if (lev == level)
@@ -1449,8 +1502,8 @@ Nyx::post_timestep (int iteration)
                     Array4<Real const> const& gdphi = grad_delta_phi_cc[lev-level]->array(mfi);
                     Array4<Real      > const& s_fab = S_new_lev.array(mfi);
 
-                    int iden  = Density;
-                    int ieden = Eden;
+                    int iden  = Density_comp;
+                    int ieden = Eden_comp;
 
                     amrex::ParallelFor(bx, [s_fab,d_fab,gphi,gdphi,a_new,dt_lev,iden,ieden]
                        AMREX_GPU_DEVICE (int i, int j, int k) noexcept
@@ -1587,7 +1640,11 @@ Nyx::post_restart ()
 
     if (inhomo_reion) init_zhi();
 
-    Real cur_time = state[State_for_Time].curTime();
+#ifndef NO_HYDRO
+    Real cur_time = state[State_Type].curTime();
+#else
+    Real cur_time = state[PhiGrav_Type].curTime();
+#endif
 
     // Update the value of a only if restarting from chk00000
     //   (special case for which computeNewDt is *not* called from Amr::coarseTimeStep)
@@ -1625,7 +1682,7 @@ Nyx::post_restart ()
                 {
                     const auto& ba = get_level(k).boxArray();
                     const auto& dm = get_level(k).DistributionMap();
-                    MultiFab grav_vec_new(ba, dm, BL_SPACEDIM, 0);
+                    MultiFab grav_vec_new(ba, dm, AMREX_SPACEDIM, 0);
                     gravity->get_new_grav_vector(k, grav_vec_new, cur_time);
                 }
             }
@@ -1727,14 +1784,14 @@ Nyx::postCoarseTimeStep (Real cumtime)
         }
         else if(load_balance_wgt_strategy == 2)
         {
-            MultiFab particle_mf(grids,theDMPC()->ParticleDistributionMap(level),1,1);
-            theDMPC()->Increment(particle_mf, level);
+            MultiFab particle_mf(grids,theDMPC()->ParticleDistributionMap(lev),1,1);
+            theDMPC()->Increment(particle_mf, lev);
             if(load_balance_strategy==DistributionMapping::Strategy::KNAPSACK)
-                dm.KnapSackProcessorMap(wgts, load_balance_wgt_nmax);
+                dm = DistributionMapping::makeKnapSack(particle_mf, load_balance_wgt_nmax);
             else if(load_balance_strategy==DistributionMapping::Strategy::SFC)
-                dm.SFCProcessorMap(grids, wgts, load_balance_wgt_nmax);
+                dm = DistributionMapping::makeSFC(particle_mf, load_balance_wgt_nmax);
             else if(load_balance_strategy==DistributionMapping::Strategy::ROUNDROBIN)
-                dm.RoundRobinProcessorMap(wgts, load_balance_wgt_nmax);
+                dm = DistributionMapping::makeRoundRobin(particle_mf);
         }
         else
         {
@@ -1770,13 +1827,6 @@ Nyx::postCoarseTimeStep (Real cumtime)
    LyA_statistics();
 #endif
 
-#ifdef AMREX_PARTICLES
-    //
-    // postCoarseTimeStep() is only called by level 0.
-    //
-    if (Nyx::theDMPC() && particle_move_type == "Random")
-        particle_move_random();
-#endif
    int nstep = parent->levelSteps(0);
 
 #ifndef NO_HYDRO
@@ -1870,9 +1920,10 @@ Nyx::postCoarseTimeStep (Real cumtime)
       DMFNames[1] = slicefilename + "/Diag_y";
       DMFNames[2] = slicefilename + "/Diag_z";
 
-      for(int dir(0); dir < 3; ++dir) {
+      for(int dir(0); dir < 3; ++dir) 
+      {
         Box sliceBox(geom.Domain());
-        int dir_coord = geom.ProbLo()[dir] + (geom.Domain().length(dir) / 2);
+        int dir_coord = static_cast<int>(geom.ProbLo()[dir] + 0.5*geom.Domain().length(dir));
         amrex::Print() << "Outputting slices at dir_coord[" << dir << "] = " << dir_coord << '\n';
         sliceBox.setSmall(dir, dir_coord);
         sliceBox.setBig(dir, dir_coord);
@@ -1940,10 +1991,16 @@ Nyx::post_regrid (int lbase,
 
         // Only do solve here if we will be using it in the timestep right after without re-solving,
         //      or if this is called from somewhere other than Amr::timeStep
-        const Real cur_time = state[State_for_Time].curTime();
+#ifndef NO_HYDRO
+    const Real cur_time = state[State_Type].curTime();
+#else
+    const Real cur_time = state[PhiGrav_Type].curTime();
+#endif
         if ((cur_time > 0) && do_grav_solve_here)
         {
-            int ngrow_for_solve = parent->levelCount(level) + 1;
+            // We have done a particle redistribute above so we shouldn't need to grow by more than 1
+            // to capture the effect of all particles on this level
+            int ngrow_for_solve = 1;
             int use_previous_phi_as_guess = 1;
         gravity->multilevel_solve_for_new_phi(level, new_finest, ngrow_for_solve, use_previous_phi_as_guess);
         }
@@ -1953,7 +2010,7 @@ Nyx::post_regrid (int lbase,
 }
 
 void
-Nyx::post_init (Real stop_time)
+Nyx::post_init (Real /*stop_time*/)
 {
     BL_PROFILE("Nyx::post_init()");
     if (level > 0) {
@@ -1977,7 +2034,11 @@ Nyx::post_init (Real stop_time)
 
     if (do_grav)
     {
-        const Real cur_time = state[State_for_Time].curTime();
+#ifndef NO_HYDRO
+        const Real cur_time = state[State_Type].curTime();
+#else
+        const Real cur_time = state[PhiGrav_Type].curTime();
+#endif
 
         //
         // Calculate offset before first multilevel solve.
@@ -1995,7 +2056,7 @@ Nyx::post_init (Real stop_time)
         {
             const auto& ba = get_level(k).boxArray();
             const auto& dm = get_level(k).DistributionMap();
-            MultiFab grav_vec_new(ba, dm, BL_SPACEDIM, 0);
+            MultiFab grav_vec_new(ba, dm, AMREX_SPACEDIM, 0);
             gravity->get_new_grav_vector(k, grav_vec_new, cur_time);
         }
     }
@@ -2036,7 +2097,11 @@ Nyx::okToContinue ()
 
     if ((test == 1) && (final_a > 0))
     {
-        Real cur_time = state[State_for_Time].curTime();
+#ifndef NO_HYDRO
+        const Real cur_time = state[State_Type].curTime();
+#else
+        const Real cur_time = state[PhiGrav_Type].curTime();
+#endif
         Real a = get_comoving_a(cur_time);
         if (a >= final_a) test = 0;
         if (verbose && ParallelDescriptor::IOProcessor())
@@ -2116,7 +2181,7 @@ Nyx::enforce_nonnegative_species (MultiFab& S_new)
 {
     BL_PROFILE("Nyx::enforce_nonnegative_species()");
     Real eps = -1.0e-16;
-    int NumSpec = S_new.nComp()-FirstSpec;
+    int NumSpec = S_new.nComp()-FirstSpec_comp;
 
     if (NumSpec > 0)
     {
@@ -2134,11 +2199,11 @@ Nyx::enforce_nonnegative_species (MultiFab& S_new)
                Real x;
                Real dom_spec;
                int int_dom_spec;
-               for (int n = FirstSpec; n < FirstSpec + NumSpec; n++)
+               for (int n = FirstSpec_comp; n < FirstSpec_comp + NumSpec; n++)
                {
                    if (uout(i,j,k,n) < 0.0)
                    {
-                       x = uout(i,j,k,n)/uout(i,j,k,URHO);
+                       x = uout(i,j,k,n)/uout(i,j,k,Density_comp);
                        if (x > eps)
                            uout(i,j,k,n) = 0.0;
                        else
@@ -2154,10 +2219,10 @@ Nyx::enforce_nonnegative_species (MultiFab& S_new)
                //
                // Find the dominant species.
                //
-                   int_dom_spec = FirstSpec;
+                   int_dom_spec = FirstSpec_comp;
                    dom_spec     = uout(i,j,k,int_dom_spec);
 
-                   for (int n = 0; n < FirstSpec + NumSpec; n++)
+                   for (int n = 0; n < FirstSpec_comp + NumSpec; n++)
                    {
                        if (uout(i,j,k,n) > dom_spec)
                        {
@@ -2168,11 +2233,11 @@ Nyx::enforce_nonnegative_species (MultiFab& S_new)
                    //
                    // Now take care of undershoots greater in magnitude than 1e-16.
                    //
-                   for (int n = 0; n < FirstSpec + NumSpec; n++)
+                   for (int n = 0; n < FirstSpec_comp + NumSpec; n++)
                    {
                        if (uout(i,j,k,n) < 0.0)
                        {
-                           x = uout(i,j,k,n)/uout(i,j,k,URHO);
+                           x = uout(i,j,k,n)/uout(i,j,k,Density_comp);
                            //
                            // Take enough from the dominant species to fill the negative one.
                            //
@@ -2211,10 +2276,10 @@ Nyx::enforce_consistent_e (MultiFab& S)
         amrex::ParallelFor(bx,
         [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
         {
-            s_arr(i,j,k,Eden) = s_arr(i,j,k,Eint) + 0.5 * (
-                                s_arr(i,j,k,Xmom)*s_arr(i,j,k,Xmom) +
-                                s_arr(i,j,k,Ymom)*s_arr(i,j,k,Ymom) +
-                                s_arr(i,j,k,Zmom)*s_arr(i,j,k,Zmom) ) / s_arr(i,j,k,Density);
+            s_arr(i,j,k,Eden_comp) = s_arr(i,j,k,Eint_comp) + 0.5 * (
+                                s_arr(i,j,k,Xmom_comp)*s_arr(i,j,k,Xmom_comp) +
+                                s_arr(i,j,k,Ymom_comp)*s_arr(i,j,k,Ymom_comp) +
+                                s_arr(i,j,k,Zmom_comp)*s_arr(i,j,k,Zmom_comp) ) / s_arr(i,j,k,Density_comp);
         });
   }
 }
@@ -2270,8 +2335,8 @@ Nyx::errorEst (TagBoxArray& tags,
                int          clearval,
                int          tagval,
                Real         time,
-               int          n_error_buf,
-               int          ngrow)
+               int        /*n_error_buf*/,
+               int        /*ngrow*/)
 {
     BL_PROFILE("Nyx::errorEst()");
 
@@ -2450,13 +2515,10 @@ Nyx::compute_new_temp (MultiFab& S_new, MultiFab& D_new)
             test_d.copy(D_new[mfi],bx);
             //      test.copy(S_new[mfi],0,0,S_new.nComp());
             //test_d.copy(D_new[mfi],0,0,D_new.nComp());*/
-            const auto state = S_new.array(mfi);
-            const auto diag_eos = D_new.array(mfi);
-            /*      const auto test_fab = test.array();
-            const auto test_fab_diag = test_d.array();
-            amrex::Print()<<"2-norm of test: "<<test_d.norm(2,1)<<std::endl;
-            amrex::Print()<<"2-norm of compare: "<<(D_new[mfi]).norm(2,1)<<std::endl;
-            */
+
+            const auto state_fab    = S_new.array(mfi);
+            const auto diag_eos_fab = D_new.array(mfi);
+
             //      AMREX_LAUNCH_DEVICE_LAMBDA
 
 
@@ -2469,35 +2531,35 @@ Nyx::compute_new_temp (MultiFab& S_new, MultiFab& D_new)
             auto atomic_rates = atomic_rates_glob;
             AMREX_PARALLEL_FOR_3D(bx, i, j ,k,
             {
+              Real rhoInv = 1.0 / state_fab(i,j,k,Density_comp);
+              Real eint = state_fab(i,j,k,Eint_comp) * rhoInv;
 
-              Real rhoInv = 1.e0 / state(i,j,k,Density);
-              Real eint = state(i,j,k,Eint) * rhoInv;
-
-            if (state(i,j,k,Eint) > 0.0)
-              {
-
-                eint = state(i,j,k,Eint) * rhoInv;
+            if (state_fab(i,j,k,Eint_comp) > 0.0)
+            {
+                eint = state_fab(i,j,k,Eint_comp) * rhoInv;
 
                 int JH = 1;
                 int JHe = 1;
 
-                nyx_eos_T_given_Re_device(atomic_rates, gamma_minus_1_in, h_species_in, JH, JHe, &diag_eos(i,j,k,Temp_comp), &diag_eos(i,j,k,Ne_comp),
-                                               state(i,j,k,Density), eint, a);
-                if(diag_eos(i,j,k,Temp_comp)>=local_large_temp && local_max_temp_dt == 1)
+                nyx_eos_T_given_Re_device(atomic_rates, gamma_minus_1_in, h_species_in, JH, JHe, 
+                                          &diag_eos_fab(i,j,k,Temp_comp), &diag_eos_fab(i,j,k,Ne_comp),
+                                          state_fab(i,j,k,Density_comp), eint, a);
+                if(diag_eos_fab(i,j,k,Temp_comp)>=local_large_temp && local_max_temp_dt == 1)
                 {
-                  diag_eos(i,j,k,Temp_comp) = local_large_temp;
+                  diag_eos_fab(i,j,k,Temp_comp) = local_large_temp;
 
                   Real dummy_pres=0.0;
                   // Set temp to small_temp and compute corresponding internal energy
-                  nyx_eos_given_RT(atomic_rates, gamma_minus_1_in, h_species_in, &eint, &dummy_pres, state(i,j,k,Density), diag_eos(i,j,k,Temp_comp),
-                                    diag_eos(i,j,k,Ne_comp), a);
+                  nyx_eos_given_RT(atomic_rates, gamma_minus_1_in, h_species_in, &eint, &dummy_pres, 
+                                   state_fab(i,j,k,Density_comp), diag_eos_fab(i,j,k,Temp_comp),
+                                   diag_eos_fab(i,j,k,Ne_comp), a);
 
-                   Real ke = 0.5e0 * (state(i,j,k,Xmom) * state(i,j,k,Xmom) +
-                              state(i,j,k,Ymom) * state(i,j,k,Ymom) +
-                              state(i,j,k,Zmom) * state(i,j,k,Zmom)) * rhoInv;
+                   Real ke = 0.5e0 * (state_fab(i,j,k,Xmom_comp) * state_fab(i,j,k,Xmom_comp) +
+                                      state_fab(i,j,k,Ymom_comp) * state_fab(i,j,k,Ymom_comp) +
+                                      state_fab(i,j,k,Zmom_comp) * state_fab(i,j,k,Zmom_comp)) * rhoInv;
 
-                   state(i,j,k,Eint) = state(i,j,k,Density) * eint;
-                   state(i,j,k,Eden) = state(i,j,k,Eint) + ke;
+                   state_fab(i,j,k,Eint_comp) = state_fab(i,j,k,Density_comp) * eint;
+                   state_fab(i,j,k,Eden_comp) = state_fab(i,j,k,Eint_comp) + ke;
 
                 }
               }
@@ -2505,16 +2567,17 @@ Nyx::compute_new_temp (MultiFab& S_new, MultiFab& D_new)
               {
                 Real dummy_pres=0.0;
                 // Set temp to small_temp and compute corresponding internal energy
-                nyx_eos_given_RT(atomic_rates, gamma_minus_1_in, h_species_in, &eint, &dummy_pres, state(i,j,k,Density), local_small_temp,
-                                    diag_eos(i,j,k,Ne_comp), a);
+                nyx_eos_given_RT(atomic_rates, gamma_minus_1_in, h_species_in, &eint, &dummy_pres, 
+                                 state_fab(i,j,k,Density_comp), local_small_temp,
+                                 diag_eos_fab(i,j,k,Ne_comp), a);
 
-                Real ke = 0.5e0 * (state(i,j,k,Xmom) * state(i,j,k,Xmom) +
-                              state(i,j,k,Ymom) * state(i,j,k,Ymom) +
-                              state(i,j,k,Zmom) * state(i,j,k,Zmom)) * rhoInv;
+                Real ke = 0.5e0 * (state_fab(i,j,k,Xmom_comp) * state_fab(i,j,k,Xmom_comp) +
+                                   state_fab(i,j,k,Ymom_comp) * state_fab(i,j,k,Ymom_comp) +
+                                   state_fab(i,j,k,Zmom_comp) * state_fab(i,j,k,Zmom_comp)) * rhoInv;
 
-                diag_eos(i,j,k,Temp_comp) = local_small_temp;
-                state(i,j,k,Eint) = state(i,j,k,Density) * eint;
-                state(i,j,k,Eden) = state(i,j,k,Eint) + ke;
+                diag_eos_fab(i,j,k,Temp_comp) = local_small_temp;
+                state_fab(i,j,k,Eint_comp) = state_fab(i,j,k,Density_comp) * eint;
+                state_fab(i,j,k,Eden_comp) = state_fab(i,j,k,Eint_comp) + ke;
               }
 
             });
@@ -2544,7 +2607,7 @@ Nyx::compute_new_temp (MultiFab& S_new, MultiFab& D_new)
                 if(bx.contains(max_temp_loc))
                   {
                     const auto fab_state = S_new.array(mfi);
-                    Real den_maxt=fab_state(max_temp_loc,Density);
+                    Real den_maxt=fab_state(max_temp_loc,Density_comp);
                     std::cout << "Maximum temp. at level " << level << " is " << max_temp
                                 << " at density " << den_maxt
                                 << " at (i,j,k) " << max_temp_loc << std::endl;
@@ -2592,7 +2655,7 @@ Nyx::compute_rho_temp (Real& rho_T_avg, Real& T_avg, Real& Tinv_avg, Real& T_mea
             [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple
             {
                 Real T_tmp = diag_eos(i,j,k,Temp_comp);
-                Real rho_tmp = state(i,j,k,Density);
+                Real rho_tmp = state(i,j,k,Density_comp);
                 Real l_rho_T_sum = 0._rt;
                 Real l_rho_sum = 0._rt;
                 Real l_T_sum = 0._rt;
@@ -2614,20 +2677,19 @@ Nyx::compute_rho_temp (Real& rho_T_avg, Real& T_avg, Real& Tinv_avg, Real& T_mea
         }
 
         ReduceTuple hv = reduce_data.value();
-        rho_T_sum = amrex::get<0>(hv);
-        rho_sum  = amrex::get<1>(hv);
-        T_sum   = amrex::get<2>(hv);
-        Tinv_sum    = amrex::get<3>(hv);
+        rho_T_sum      = amrex::get<0>(hv);
+        rho_sum        = amrex::get<1>(hv);
+        T_sum          = amrex::get<2>(hv);
+        Tinv_sum       = amrex::get<3>(hv);
         T_meanrho_sum  = amrex::get<4>(hv);
-        vol_sum   = amrex::get<5>(hv);
-        vol_mn_sum  = amrex::get<6>(hv);
-
+        vol_sum        = amrex::get<5>(hv);
+        vol_mn_sum     = amrex::get<6>(hv);
     }
     else
 #endif
     {
 #ifdef _OPENMP
-#pragma omp parallel if (amrex::Gpu::notInLaunchRegion())               \
+#pragma omp parallel if (amrex::Gpu::notInLaunchRegion() && !system::regtest_reduction)               \
     reduction(+:rho_T_sum, rho_sum, T_sum, Tinv_sum, T_meanrho_sum, vol_sum, vol_mn_sum)
 #endif
     {
@@ -2640,11 +2702,13 @@ Nyx::compute_rho_temp (Real& rho_T_avg, Real& T_avg, Real& Tinv_avg, Real& T_mea
             AMREX_LOOP_3D(bx, i, j, k,
             {
                 Real T_tmp   = d_arr(i,j,k,Temp_comp);
-                Real rho_tmp = s_arr(i,j,k,Density);
-                T_sum += vol*T_tmp;
-                Tinv_sum += rho_tmp/T_tmp;
+                Real rho_tmp = s_arr(i,j,k,Density_comp);
+
+                T_sum     += vol*T_tmp;
+                Tinv_sum  += rho_tmp/T_tmp;
                 rho_T_sum += rho_tmp*T_tmp;
-                rho_sum += rho_tmp;
+                rho_sum   += rho_tmp;
+
                 if ( (rho_tmp < rho_hi) &&  (rho_tmp > rho_lo) && (T_tmp <= 1.0e5) ) {
                     T_meanrho_sum += vol*log10(T_tmp);
                     vol_mn_sum += vol;
@@ -2654,18 +2718,20 @@ Nyx::compute_rho_temp (Real& rho_T_avg, Real& T_avg, Real& Tinv_avg, Real& T_mea
         }
     }
     }
-        Real sums[7] = {rho_T_sum, rho_sum, T_sum, Tinv_sum, T_meanrho_sum, vol_sum, vol_mn_sum};
+
+    Real sums[7] = {rho_T_sum, rho_sum, T_sum, Tinv_sum, T_meanrho_sum, vol_sum, vol_mn_sum};
+
     ParallelDescriptor::ReduceRealSum(sums,7);
 
     rho_T_avg = sums[0] / sums[1];  // density weighted T
         T_avg = sums[2] / sums[5];  // volume weighted T
      Tinv_avg = sums[3] / sums[1];  // 21cm T
+
     if (sums[6] > 0) {
        T_meanrho = sums[4] / sums[6];  // T at mean density
        T_meanrho = pow(10.0, T_meanrho);
     }
     }
-
 }
 #endif
 
@@ -2686,9 +2752,9 @@ Nyx::compute_gas_fractions (Real T_cut, Real rho_cut,
     Real igm_mass=0.0, igm_vol=0.0, mass_sum=0.0, vol_sum=0.0;
 
     const auto dx= geom.CellSizeArray();
-    Real local_average_gas_density = average_gas_density;
 
 #ifdef AMREX_USE_GPU
+    Real local_average_gas_density = average_gas_density;
     if (Gpu::inLaunchRegion())
     {
         ReduceOps<ReduceOpSum,ReduceOpSum,ReduceOpSum,ReduceOpSum,
@@ -2706,8 +2772,8 @@ Nyx::compute_gas_fractions (Real T_cut, Real rho_cut,
             [=] AMREX_GPU_DEVICE (int i, int j, int k) -> ReduceTuple
             {
                 Real T = diag_eos(i,j,k,Temp_comp);
-                Real R = state(i,j,k,Density) / local_average_gas_density;
-                Real rho_vol = state(i,j,k,Density)*vol;
+                Real R = state(i,j,k,Density_comp) / local_average_gas_density;
+                Real rho_vol = state(i,j,k,Density_comp)*vol;
                 Real l_whim_mass = 0._rt;
                 Real l_whim_vol = 0._rt;
                 Real l_hh_mass = 0._rt;
@@ -2759,8 +2825,8 @@ Nyx::compute_gas_fractions (Real T_cut, Real rho_cut,
             AMREX_LOOP_3D(bx, i, j, k,
             {
                 Real T = diag_eos(i,j,k,Temp_comp);
-                Real R = s_arr(i,j,k,Density) / average_gas_density;
-                Real rho_vol = s_arr(i,j,k,Density)*vol;
+                Real R = s_arr(i,j,k,Density_comp) / average_gas_density;
+                Real rho_vol = s_arr(i,j,k,Density_comp)*vol;
                 if ( (T > T_cut) && (R <= rho_cut) ) {
                     whim_mass += rho_vol;
                     whim_vol += vol;

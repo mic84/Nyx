@@ -14,8 +14,8 @@ Nyx::correct_gsrc(int lev, Real time, Real prev_time, Real cur_time, Real dt)
 
     // These vectors are only used for the call to correct_gsrc so they 
     //    don't need any ghost cells
-    MultiFab grav_vec_old(ba, dm, BL_SPACEDIM, 0);
-    MultiFab grav_vec_new(ba, dm, BL_SPACEDIM, 0);
+    MultiFab grav_vec_old(ba, dm, AMREX_SPACEDIM, 0);
+    MultiFab grav_vec_new(ba, dm, AMREX_SPACEDIM, 0);
 
     get_level(lev).gravity->get_old_grav_vector(lev, grav_vec_old, time);
     get_level(lev).gravity->get_new_grav_vector(lev, grav_vec_new, cur_time);
@@ -44,8 +44,8 @@ Nyx::correct_gsrc(int lev, Real time, Real prev_time, Real cur_time, Real dt)
         const auto s_old = S_old.array(mfi);
         const auto s_new = S_new.array(mfi);
 
-        int  iden = Density; 
-        int ieden = Eden; 
+        int  iden = Density_comp; 
+        int ieden = Eden_comp; 
 
         amrex::ParallelFor(bx, [g_old,g_new,s_old,s_new,a_old,a_new,iden,ieden,dt]
         AMREX_GPU_DEVICE (int i, int j, int k) noexcept

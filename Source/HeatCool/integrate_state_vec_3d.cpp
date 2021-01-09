@@ -49,15 +49,9 @@ int Nyx::integrate_state_vec
   //  fort_ode_eos_setup(a,delta_time);
   long int store_steps=new_max_sundials_steps;
   
-  //#ifdef _OPENMP
-  //#pragma omp parallel if (Gpu::notInLaunchRegion())
-  //#endif
-#ifdef _OPENMP
-  for ( MFIter mfi(S_old, false); mfi.isValid(); ++mfi )
-#else
-  for ( MFIter mfi(S_old, TilingIfNotGPU()); mfi.isValid(); ++mfi )
-#endif
-    {
+  bool tiling = (sundials_use_tiling && TilingIfNotGPU());
+  for ( MFIter mfi(S_old, tiling); mfi.isValid(); ++mfi )
+  {
 
       //check that copy contructor vs create constructor works??
       const Box& tbx = mfi.tilebox();
@@ -68,7 +62,7 @@ int Nyx::integrate_state_vec
       Array4<Real> const& diag_eos4 = D_old.array(mfi);
 
       integrate_state_vec_mfin(state4,diag_eos4,tbx,a,delta_time,store_steps,new_max_sundials_steps);
-}
+  }
       return 0;
 }
 
@@ -198,28 +192,35 @@ int Nyx::integrate_state_vec_mfin
 #endif
 #endif
 
+#ifdef AMREX_USE_GPU
+                                AMREX_PARALLEL_FOR_3D ( tbx, i,j,k,
+                                {
+#else
 #ifdef _OPENMP
       const Dim3 hi = amrex::ubound(tbx);
-
 #pragma omp parallel for collapse(3)
       for (int k = lo.z; k <= hi.z; ++k) {
         for (int j = lo.y; j <= hi.y; ++j) {
             for (int i = lo.x; i <= hi.x; ++i) {
                 //Skip setup since parameters are hard-coded
-                //fort_ode_eos_setup(a,delta_time);
 #else
                                 AMREX_PARALLEL_FOR_3D ( tbx, i,j,k,
-                                {                                 
+                                {
+#endif
 #endif
                                   int idx = i+j*len.x+k*len.x*len.y-(lo.x+lo.y*len.x+lo.z*len.x*len.y);
-                                  dptr[idx]=state4(i,j,k,Eint)/state4(i,j,k,Density);
-                                  eptr[idx]=state4(i,j,k,Eint)/state4(i,j,k,Density);
+                                  dptr[idx]=state4(i,j,k,Eint_comp)/state4(i,j,k,Density_comp);
+                                  eptr[idx]=state4(i,j,k,Eint_comp)/state4(i,j,k,Density_comp);
                                   rparh[4*idx+0]= diag_eos4(i,j,k,Temp_comp);   //rpar(1)=T_vode
                                   rparh[4*idx+1]= diag_eos4(i,j,k,Ne_comp);//    rpar(2)=ne_vode
-                                  rparh[4*idx+2]= state4(i,j,k,Density); //    rpar(3)=rho_vode
+                                  rparh[4*idx+2]= state4(i,j,k,Density_comp); //    rpar(3)=rho_vode
                                   rparh[4*idx+3]=1/a-1;    //    rpar(4)=z_vode
-                                  abstol_ptr[idx]= state4(i,j,k,Eint)/state4(i,j,k,Density)*abstol;
+                                  abstol_ptr[idx]= state4(i,j,k,Eint_comp)/state4(i,j,k,Density_comp)*abstol;
                                   //                            }
+#ifdef AMREX_USE_GPU
+                                });
+                                amrex::Gpu::Device::streamSynchronize();
+#else
 #ifdef _OPENMP
                                 }
                                 }
@@ -227,7 +228,8 @@ int Nyx::integrate_state_vec_mfin
 #pragma omp barrier
 #else
                                 });
-      amrex::Gpu::Device::streamSynchronize();
+                                amrex::Gpu::Device::streamSynchronize();
+#endif
 #endif
 
 #ifdef CV_NEWTON
@@ -281,25 +283,37 @@ int Nyx::integrate_state_vec_mfin
                                 PrintFinalStats(cvode_mem);
 #endif
   auto atomic_rates = atomic_rates_glob;
+  Real lh_species = Nyx::h_species;
+#ifdef AMREX_USE_GPU
+                                AMREX_PARALLEL_FOR_3D ( tbx, i,j,k,
+                                {
+#else
 #ifdef _OPENMP
 #pragma omp parallel for collapse(3)
       for (int k = lo.z; k <= hi.z; ++k) {
         for (int j = lo.y; j <= hi.y; ++j) {
             for (int i = lo.x; i <= hi.x; ++i) {
+                //Skip setup since parameters are hard-coded
 #else
                                 AMREX_PARALLEL_FOR_3D ( tbx, i,j,k,
-                                {                                 
+                                {
+#endif
 #endif
                                   int  idx= i+j*len.x+k*len.x*len.y-(lo.x+lo.y*len.x+lo.z*len.x*len.y);
                                 //                              for (int i= 0;i < neq; ++i) {
-                                  ode_eos_finalize((dptr[idx*loop]), &(rparh[4*idx*loop]), one_in, atomic_rates);
+                                  ode_eos_finalize((dptr[idx*loop]), &(rparh[4*idx*loop]), one_in, atomic_rates, lh_species);
                                   diag_eos4(i,j,k,Temp_comp)=rparh[4*idx*loop+0];   //rpar(1)=T_vode
                                   diag_eos4(i,j,k,Ne_comp)=rparh[4*idx*loop+1];//    rpar(2)=ne_vode
                                 
-                                  state4(i,j,k,Eint)  += state4(i,j,k,Density) * (dptr[idx*loop]-eptr[idx]);
-                                  state4(i,j,k,Eden)  += state4(i,j,k,Density) * (dptr[idx*loop]-eptr[idx]);
+                                  state4(i,j,k,Eint_comp)  += state4(i,j,k,Density_comp) * (dptr[idx*loop]-eptr[idx]);
+                                  state4(i,j,k,Eden_comp)  += state4(i,j,k,Density_comp) * (dptr[idx*loop]-eptr[idx]);
                                   //                            }
                                 //PrintFinalStats(cvode_mem);
+
+#ifdef AMREX_USE_GPU
+                                });
+                                amrex::Gpu::Device::streamSynchronize();
+#else
 #ifdef _OPENMP
                                 }
                                 }
@@ -307,9 +321,9 @@ int Nyx::integrate_state_vec_mfin
 #pragma omp barrier
 #else
                                 });
-      amrex::Gpu::Device::streamSynchronize();
+                                amrex::Gpu::Device::streamSynchronize();
 #endif
-
+#endif
 
 #ifdef AMREX_USE_CUDA
       if(sundials_alloc_type%2!=0)
@@ -343,34 +357,28 @@ int Nyx::integrate_state_grownvec
    amrex::MultiFab &D_old,
    const Real& a, const Real& delta_time)
 {
+    //Skip setup since parameters are hard-coded
+    //  fort_ode_eos_setup(a,delta_time);
 
-  //Skip setup since parameters are hard-coded
-  //  fort_ode_eos_setup(a,delta_time);
-  amrex::Gpu::LaunchSafeGuard lsg(true);
-  long int store_steps=old_max_sundials_steps;
+    amrex::Gpu::LaunchSafeGuard lsg(true);
+
+    long int store_steps=old_max_sundials_steps;
   
-  const Real prev_time     = state[State_Type].prevTime();
+    const Real prev_time     = state[State_Type].prevTime();
   
-  //#ifdef _OPENMP
-  //#pragma omp parallel if (Gpu::notInLaunchRegion())
-  //#endif
-#ifdef _OPENMP
-  for ( MFIter mfi(S_old, false); mfi.isValid(); ++mfi )
-#else
-  for ( MFIter mfi(S_old, TilingIfNotGPU()); mfi.isValid(); ++mfi )
-#endif
+    bool tiling = (sundials_use_tiling && TilingIfNotGPU());
+    for ( MFIter mfi(S_old, tiling); mfi.isValid(); ++mfi )
     {
+        //check that copy contructor vs create constructor works??
+        const Box& tbx = mfi.growntilebox();
 
-      //check that copy contructor vs create constructor works??
-      const Box& tbx = mfi.growntilebox();
+        S_old[mfi].prefetchToDevice();
+        D_old[mfi].prefetchToDevice();
 
-      S_old[mfi].prefetchToDevice();
-      D_old[mfi].prefetchToDevice();
+        Array4<Real> const& state4 = S_old.array(mfi);
+        Array4<Real> const& diag_eos4 = D_old.array(mfi);
 
-      Array4<Real> const& state4 = S_old.array(mfi);
-      Array4<Real> const& diag_eos4 = D_old.array(mfi);
-
-      integrate_state_vec_mfin(state4,diag_eos4,tbx,a,delta_time,store_steps,old_max_sundials_steps);
+        integrate_state_vec_mfin(state4,diag_eos4,tbx,a,delta_time,store_steps,old_max_sundials_steps);
     }
 
     return 0;
@@ -386,9 +394,10 @@ static int f(realtype t, N_Vector u, N_Vector udot, void *user_data)
   
   cudaStream_t currentStream = amrex::Gpu::Device::cudaStream();
   auto atomic_rates = atomic_rates_glob;
+  Real lh_species = Nyx::h_species;
   AMREX_LAUNCH_DEVICE_LAMBDA ( neq, idx, {
       //  f_rhs_test(t,u_ptr,udot_ptr, rpar, neq);
-      f_rhs_rpar(t,*(u_ptr+idx),*(udot_ptr+idx), (rpar+4*idx), atomic_rates);
+      f_rhs_rpar(t,*(u_ptr+idx),*(udot_ptr+idx), (rpar+4*idx), atomic_rates, lh_species);
   });
   cudaStreamSynchronize(currentStream);
 
@@ -404,10 +413,11 @@ static int f(realtype t, N_Vector u, N_Vector udot, void* user_data)
   int neq=N_VGetLength_Serial(udot);
   double*  rpar=N_VGetArrayPointer_Serial(*(static_cast<N_Vector*>(user_data)));
   auto atomic_rates = atomic_rates_glob;
+  Real lh_species = Nyx::h_species;
   #pragma omp parallel for
   for(int tid=0;tid<neq;tid++)
     {
-        f_rhs_rpar(t, (u_ptr[tid]),(udot_ptr[tid]),&(rpar[4*tid]), atomic_rates);
+        f_rhs_rpar(t, (u_ptr[tid]),(udot_ptr[tid]),&(rpar[4*tid]), atomic_rates, lh_species);
     }
 
   return 0;

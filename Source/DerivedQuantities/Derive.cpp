@@ -9,9 +9,9 @@ extern "C"
 {
 #endif
 
-  void derstate(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                   const FArrayBox& datfab, const Geometry& geomdata,
-                   Real /*time*/, const int* /*bcrec*/, int /*level*/)
+  void derstate(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                const FArrayBox& datfab, const Geometry& /*geomdata*/,
+                Real /*time*/, const int* /*bcrec*/, int /*level*/)
   {
 
       auto const dat = datfab.array();
@@ -37,9 +37,9 @@ extern "C"
 
     }
 
-    void dervel(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                   const FArrayBox& datfab, const Geometry& geomdata,
-                   Real /*time*/, const int* /*bcrec*/, int /*level*/)
+    void dervel(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                const FArrayBox& datfab, const Geometry& /*geomdata*/,
+                Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
       auto const dat = datfab.array();
@@ -52,8 +52,8 @@ extern "C"
       });
     }
 
-    void dermagvel(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                   const FArrayBox& datfab, const Geometry& geomdata,
+    void dermagvel(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                   const FArrayBox& datfab, const Geometry& /*geomdata*/,
                    Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
@@ -70,7 +70,7 @@ extern "C"
       });
     }
 
-    void dermagvort(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
+    void dermagvort(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
                     const FArrayBox& datfab, const Geometry& geomdata,
                     Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
@@ -99,9 +99,9 @@ extern "C"
       });
     }
 
-  void dermagmom(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                    const FArrayBox& datfab, const Geometry& geomdata,
-                    Real /*time*/, const int* /*bcrec*/, int /*level*/)
+  void dermagmom(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                 const FArrayBox& datfab, const Geometry& /*geomdata*/,
+                 Real /*time*/, const int* /*bcrec*/, int /*level*/)
   {
 
     auto const dat = datfab.array();
@@ -118,8 +118,8 @@ extern "C"
                        });
   }
 
-    void derpres(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                 const FArrayBox& datfab, const Geometry& geomdata,
+    void derpres(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                 const FArrayBox& datfab, const Geometry& /*geomdata*/,
                  Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
@@ -132,13 +132,13 @@ extern "C"
       [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
       {
 
-        der(i,j,k,0) = gamma_minus_1_local * dat(i,j,k,Eint);
+        der(i,j,k,0) = gamma_minus_1_local * dat(i,j,k,Eint_comp);
 
       });
     }
 
-    void derlogden(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                   const FArrayBox& datfab, const Geometry& geomdata,
+    void derlogden(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                   const FArrayBox& datfab, const Geometry& /*geomdata*/,
                    Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
@@ -152,8 +152,8 @@ extern "C"
       });
     }
 
-    void dereint1(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                  const FArrayBox& datfab, const Geometry& geomdata,
+    void dereint1(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                  const FArrayBox& datfab, const Geometry& /*geomdata*/,
                   Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
@@ -164,18 +164,18 @@ extern "C"
       [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
       {
 
-        Real rhoInv = 1.0_rt/dat(i,j,k,Density);
-        Real ux = dat(i,j,k,Xmom)*rhoInv;
-        Real uy = dat(i,j,k,Ymom)*rhoInv;
-        Real uz = dat(i,j,k,Zmom)*rhoInv;
+        Real rhoInv = 1.0_rt/dat(i,j,k,Density_comp);
+        Real ux = dat(i,j,k,Xmom_comp)*rhoInv;
+        Real uy = dat(i,j,k,Ymom_comp)*rhoInv;
+        Real uz = dat(i,j,k,Zmom_comp)*rhoInv;
 
-        der(i,j,k,0) = dat(i,j,k,Eden)*rhoInv -
+        der(i,j,k,0) = dat(i,j,k,Eden_comp)*rhoInv -
           0.5_rt * (ux*ux + uy*uy + uz*uz);
       });
     }
 
-    void dereint2(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                  const FArrayBox& datfab, const Geometry& geomdata,
+    void dereint2(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                  const FArrayBox& datfab, const Geometry& /*geomdata*/,
                   Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
@@ -186,13 +186,13 @@ extern "C"
       [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
       {
 
-        der(i,j,k,0) = dat(i,j,k,Eint) / dat(i,j,k,Density);
+        der(i,j,k,0) = dat(i,j,k,Eint_comp) / dat(i,j,k,Density_comp);
       });
     }
 
 
-    void dersoundspeed(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                       const FArrayBox& datfab, const Geometry& geomdata,
+    void dersoundspeed(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                       const FArrayBox& datfab, const Geometry& /*geomdata*/,
                        Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
@@ -207,13 +207,10 @@ extern "C"
       [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
       {
 
-        Real rhoInv = 1.0_rt/dat(i,j,k,Density);
-        Real ux = dat(i,j,k,Xmom)*rhoInv;
-        Real uy = dat(i,j,k,Ymom)*rhoInv;
-        Real uz = dat(i,j,k,Zmom)*rhoInv;
+        Real rhoInv = 1.0_rt/dat(i,j,k,Density_comp);
 
         // Use internal energy for calculating dt 
-        Real e  = dat(i,j,k,Eint)*rhoInv;
+        Real e  = dat(i,j,k,Eint_comp)*rhoInv;
 
         // Protect against negative e
 #ifdef HEATCOOL
@@ -221,7 +218,7 @@ extern "C"
             der(i,j,k,0)=sound_speed_factor*std::sqrt(e);
 #else
         if (e > 0.0)
-            der(i,j,k,0)=sound_speed_factor*std::sqrt(dat(i,j,k,Density)*e/dat(i,j,k,Density));
+            der(i,j,k,0)=sound_speed_factor*std::sqrt(dat(i,j,k,Density_comp)*e/dat(i,j,k,Density_comp));
 #endif
         else
             der(i,j,k,0) = 0.0;
@@ -229,12 +226,12 @@ extern "C"
       });
     }
 
-    void derentropy(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                 const FArrayBox& datfab, const Geometry& geomdata,
+    void derentropy(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                 const FArrayBox& /*datfab*/, const Geometry& /*geomdata*/,
                  Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
-      auto const dat = datfab.array();
+      // auto const dat = datfab.array();
       auto const der = derfab.array();
 
       //  Here dat contains (Density, Xmom, Ymom, Zmom, (rho E), (rho e), Temp, Ne)
@@ -242,18 +239,18 @@ extern "C"
       amrex::ParallelFor(bx,
       [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
       {
-           Real rhoInv = 1.0_rt/dat(i,j,k,Density);
-           Real      e = dat(i,j,k,Eint)*rhoInv;
+           // Real rhoInv = 1.0_rt/dat(i,j,k,Density_comp);
+           // Real      e = dat(i,j,k,Eint_comp)*rhoInv;
 
         // Protect against negative e
 #ifdef HEATCOOL
 //      if (e > 0.0)
-//            call nyx_eos_S_given_Re(s(i,j,k,1), u(i,j,k,URHO), e, &
+//            call nyx_eos_S_given_Re(s(i,j,k,1), u(i,j,k,Density_comp), e, &
 //                                    u(i,j,k,7), u(i,j,k,8), &
 //                                    comoving_a = 1.d0)
 #else
 //      if (e > 0.0)
-//            call nyx_eos_S_given_Re(s(i,j,k,1), u(i,j,k,URHO), e, &
+//            call nyx_eos_S_given_Re(s(i,j,k,1), u(i,j,k,Density_comp), e, &
 //                                    u(i,j,k,7), u(i,j,k,8), &
 //                                    comoving_a = 1.d0)
 #endif
@@ -262,8 +259,8 @@ extern "C"
       });
     }
 
-    void dermachnumber(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                       const FArrayBox& datfab, const Geometry& geomdata,
+    void dermachnumber(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                       const FArrayBox& datfab, const Geometry& /*geomdata*/,
                        Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
@@ -278,13 +275,13 @@ extern "C"
       [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
       {
 
-        Real rhoInv = 1.0_rt/dat(i,j,k,Density);
-        Real ux = dat(i,j,k,Xmom)*rhoInv;
-        Real uy = dat(i,j,k,Ymom)*rhoInv;
-        Real uz = dat(i,j,k,Zmom)*rhoInv;
+        Real rhoInv = 1.0_rt/dat(i,j,k,Density_comp);
+        Real ux = dat(i,j,k,Xmom_comp)*rhoInv;
+        Real uy = dat(i,j,k,Ymom_comp)*rhoInv;
+        Real uz = dat(i,j,k,Zmom_comp)*rhoInv;
 
         // Use internal energy for calculating dt 
-        Real e  = dat(i,j,k,Eint)*rhoInv;
+        Real e  = dat(i,j,k,Eint_comp)*rhoInv;
 
         Real c;
         // Protect against negative e
@@ -293,7 +290,7 @@ extern "C"
                 c = sound_speed_factor*std::sqrt(e);
 #else
         if (e > 0.0)
-            c=sound_speed_factor*std::sqrt(dat(i,j,k,Density)*e/dat(i,j,k,Density));
+            c=sound_speed_factor*std::sqrt(dat(i,j,k,Density_comp)*e/dat(i,j,k,Density_comp));
 #endif
         else
             c = 0.0;
@@ -304,7 +301,7 @@ extern "C"
 
     }
 
-  void derkineng (const Box& bx, FArrayBox& kinengfab, int dcomp, int /*ncomp*/,
+  void derkineng (const Box& bx, FArrayBox& kinengfab, int /*dcomp*/, int /*ncomp*/,
                      const FArrayBox& datfab, const Geometry& /*geomdata*/,
                      Real /*time*/, const int* /*bcrec*/, int /*level*/)
   {
@@ -322,8 +319,8 @@ extern "C"
 
   }
 
-  void derspec(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-               const FArrayBox& datfab, const Geometry& geomdata,
+  void derspec(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+               const FArrayBox& datfab, const Geometry& /*geomdata*/,
                Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
@@ -337,7 +334,7 @@ extern "C"
       });
     }
 
-    void derdivu(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
+    void derdivu(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
                  const FArrayBox& datfab, const Geometry& geomdata,
                  Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
@@ -347,7 +344,7 @@ extern "C"
 
       auto const dx = geomdata.CellSizeArray();
 
-      // Here dat contains (Density, Xmom, Ymom, Zmom)
+      // Here dat contains (Density, Xmom, Ymom, Zmom_comp)
 
       amrex::ParallelFor(bx,
       [=] AMREX_GPU_DEVICE (int i, int j, int k) noexcept
@@ -365,15 +362,13 @@ extern "C"
       });
     }
 
-    void dermomt(const Box& bx, FArrayBox& derfab, int dcomp, int /*ncomp*/,
-                 const FArrayBox& datfab, const Geometry& geomdata,
+    void dermomt(const Box& bx, FArrayBox& derfab, int /*dcomp*/, int /*ncomp*/,
+                 const FArrayBox& datfab, const Geometry& /*geomdata*/,
                  Real /*time*/, const int* /*bcrec*/, int /*level*/)
     {
 
       auto const dat = datfab.array();
       auto const der = derfab.array();
-
-      auto const dx = geomdata.CellSizeArray();
 
       // Here dat contains (Density, Single Component of Momentum, Sdens)
 

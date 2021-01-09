@@ -3,6 +3,7 @@ EBASE     ?= Nyx
 USE_PARTICLES = TRUE
 USE_GRAV = TRUE
 BL_NO_FORT = TRUE
+USE_RPATH = TRUE
 
 include $(AMREX_HOME)/Tools/GNUMake/Make.defs
 
@@ -109,6 +110,7 @@ USE_ARKODE_LIBS ?= TRUE
 
 CPPFLAGS += -DAMREX_USE_SUNDIALS
 INCLUDE_LOCATIONS += $(SUNDIALS_ROOT)/include
+LIBRARY_LOCATIONS += $(SUNDIALS_LIB_DIR)
 
 ifeq ($(USE_CVODE_LIBS),TRUE)
   LIBRARIES += -L$(SUNDIALS_LIB_DIR) -lsundials_cvode
@@ -136,7 +138,6 @@ else
 endif
 endif
 
-LIBRARIES += -Wl,-rpath,${SUNDIALS_LIB_DIR}
 endif
 
 #These are the directories in Nyx 
@@ -144,6 +145,7 @@ endif
 Bdirs   := Source/Driver Source/TimeStep Source/Hydro
 Bdirs   += Source/EOS Source/HeatCool Source/IO Source/Initialization
 Bdirs   += Source/DerivedQuantities
+Bdirs   += Exec
 ifeq ($(USE_PARTICLES), TRUE)
 Bdirs   += Source/Particle
 endif

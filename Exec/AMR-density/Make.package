@@ -1,2 +1,2 @@
-CEXE_headers += Prob.H
-#f90EXE_sources += probdata.f90
+CEXE_sources += Prob.cpp
+CEXE_sources += Prob_error.cpp
